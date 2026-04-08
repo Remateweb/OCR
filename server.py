@@ -22,7 +22,13 @@ from pydantic import BaseModel
 from typing import Optional
 
 from stream_manager import StreamManager
-from ocr_extractor import extract_from_bytes
+
+# OCR Engine selection: 'paddle' (faster) or 'easyocr' (legacy)
+OCR_ENGINE = os.environ.get("OCR_ENGINE", "paddle").lower()
+if OCR_ENGINE == "easyocr":
+    from ocr_extractor import extract_from_bytes
+else:
+    from ocr_extractor_paddle import extract_from_bytes
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')

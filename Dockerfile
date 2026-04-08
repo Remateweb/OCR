@@ -16,11 +16,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY server.py .
 COPY ocr_extractor.py .
+COPY ocr_extractor_paddle.py .
 COPY stream_manager.py .
 COPY static/ static/
 
 # Create directories for runtime data
 RUN mkdir -p frames output
+
+# Default to PaddleOCR (faster). Set OCR_ENGINE=easyocr to use EasyOCR.
+ENV OCR_ENGINE=paddle
 
 # Expose port
 EXPOSE 8000

@@ -1,6 +1,5 @@
 fastapi
 uvicorn[standard]
-easyocr
 opencv-python
 numpy
 requests
@@ -9,3 +8,5 @@ python-multipart
 yt-dlp
 aiosqlite
 psutil
+paddlepaddle
+paddleocr
