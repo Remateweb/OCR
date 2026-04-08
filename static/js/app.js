@@ -52,13 +52,13 @@ let customColorIndex = 0;
 
 const REGION_LABELS = {
     lote: 'Lote',
-    nome: 'Pagamento',
+    nome: 'Condição',
     valor: 'Valor',
 };
 
 const REGION_DEFAULT_VALUES = {
     lote: 'lotNumber',
-    nome: 'conditions',
+    nome: 'PaymentConditions',
     valor: 'value',
 };
 

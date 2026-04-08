@@ -29,14 +29,12 @@ def get_reader():
     if _reader is None:
         logger.info("[OCR-PADDLE] Carregando modelo PaddleOCR (primeira vez)...")
         _reader = PaddleOCR(
-            use_angle_cls=False,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
             lang='pt',
-            use_gpu=False,
-            show_log=False,
-            det_db_thresh=0.3,
-            rec_batch_num=6,
-            enable_mkldnn=True,
-            cpu_threads=4,
+            text_det_thresh=0.3,
+            text_detection_model_name='PP-OCRv5_mobile_det',
         )
         logger.info("[OCR-PADDLE] Modelo PaddleOCR carregado!")
     return _reader
@@ -118,40 +116,40 @@ def extract_text_from_region(img: Image.Image, region: dict, room_id: str = "") 
         except Exception:
             pass
 
-    # Rodar PaddleOCR
+    # Rodar PaddleOCR (v3.4 usa predict())
     reader = get_reader()
     try:
-        # PaddleOCR espera BGR ou grayscale numpy array
-        # Converter grayscale para 3 canais para melhor deteccao
+        # PaddleOCR espera BGR numpy array
         if len(processed.shape) == 2:
             ocr_input = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
         else:
             ocr_input = processed
 
-        results = reader.ocr(ocr_input, cls=False)
+        results = list(reader.predict(ocr_input))
     except Exception as e:
         logger.error(f"[OCR-PADDLE] Erro: {e}")
         return "", 0
 
-    # Processar resultados
-    if not results or not results[0]:
+    # Processar resultados (v3.4: OCRResult com rec_texts e rec_scores)
+    if not results:
         return "", 0
 
-    texts = []
-    confs = []
-    for line in results[0]:
-        bbox, (text, conf) = line
-        text = str(text).strip()
-        if text:
-            texts.append(text)
-            confs.append(float(conf))
+    result = results[0]  # primeiro (e unico) resultado
+    rec_texts = result.get("rec_texts", [])
+    rec_scores = result.get("rec_scores", [])
+
+    if not rec_texts:
+        return "", 0
+
+    texts = [str(t).strip() for t in rec_texts if str(t).strip()]
+    confs = [float(s) for s in rec_scores[:len(texts)]]
 
     full_text = " ".join(texts)
     avg_conf = int((sum(confs) / len(confs)) * 100) if confs else 0
 
     # Debug detalhado para lote
     if region_type == "lote":
-        logger.info(f"[OCR-PADDLE-LOTE] Resultados: {[(t, round(c, 2)) for line in results[0] for _, (t, c) in [line]]}")
+        logger.info(f"[OCR-PADDLE-LOTE] Textos: {list(zip(texts, [round(c,2) for c in confs]))}")
         logger.info(f"[OCR-PADDLE-LOTE] Texto: '{full_text}' | Conf: {avg_conf}%")
 
     return full_text, avg_conf
@@ -190,9 +188,13 @@ def parse_nome(text: str) -> str:
 # ============================================================
 # Main (mesma interface que ocr_extractor.py)
 # ============================================================
+from concurrent.futures import ThreadPoolExecutor
+
+_thread_pool = ThreadPoolExecutor(max_workers=4)
+
 
 def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> dict:
-    """Extrai dados de todas as regioes definidas."""
+    """Extrai dados de todas as regioes definidas (em paralelo)."""
     results = {}
     raw = {}
     confidence = {}
@@ -203,9 +205,16 @@ def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> d
         "valor": parse_value,
     }
 
-    for region in regions:
+    # Processar todas as regioes em paralelo
+    def process_region(region):
         region_type = region.get("type", "custom")
         text, conf = extract_text_from_region(img, region, room_id=room_id)
+        return region_type, text, conf
+
+    futures = [_thread_pool.submit(process_region, r) for r in regions]
+
+    for future in futures:
+        region_type, text, conf = future.result()
         raw[region_type] = text
         confidence[region_type] = conf
 
@@ -226,3 +235,4 @@ def extract_from_bytes(frame_bytes: bytes, regions: list, room_id: str = "") -> 
     """Extrai dados de um frame em bytes JPEG."""
     img = Image.open(io.BytesIO(frame_bytes))
     return extract_all_regions(img, regions, room_id=room_id)
+
