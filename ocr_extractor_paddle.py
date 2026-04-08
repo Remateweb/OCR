@@ -191,13 +191,9 @@ def parse_nome(text: str) -> str:
 # ============================================================
 # Main (mesma interface que ocr_extractor.py)
 # ============================================================
-from concurrent.futures import ThreadPoolExecutor
-
-_thread_pool = ThreadPoolExecutor(max_workers=4)
-
 
 def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> dict:
-    """Extrai dados de todas as regioes definidas (em paralelo)."""
+    """Extrai dados de todas as regioes definidas."""
     results = {}
     raw = {}
     confidence = {}
@@ -208,16 +204,9 @@ def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> d
         "valor": parse_value,
     }
 
-    # Processar todas as regioes em paralelo
-    def process_region(region):
+    for region in regions:
         region_type = region.get("type", "custom")
         text, conf = extract_text_from_region(img, region, room_id=room_id)
-        return region_type, text, conf
-
-    futures = [_thread_pool.submit(process_region, r) for r in regions]
-
-    for future in futures:
-        region_type, text, conf = future.result()
         raw[region_type] = text
         confidence[region_type] = conf
 
@@ -238,4 +227,5 @@ def extract_from_bytes(frame_bytes: bytes, regions: list, room_id: str = "") -> 
     """Extrai dados de um frame em bytes JPEG."""
     img = Image.open(io.BytesIO(frame_bytes))
     return extract_all_regions(img, regions, room_id=room_id)
+
 
