@@ -178,9 +178,17 @@ def parse_lote(text: str) -> str:
     return text.strip()
 
 
-def parse_nome(text: str) -> str:
-    lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 3]
-    return " | ".join(lines) if lines else text.strip()
+def parse_condicao(text: str) -> str:
+    """Normaliza condicao de pagamento: extrai numeros e formata X + Y = Z."""
+    nums = re.findall(r"(\d+)", text)
+    if len(nums) >= 3:
+        # Padrao: X + Y = Z (ex: 1 + 29 = 30)
+        return f"{nums[0]} + {nums[1]} = {nums[2]}"
+    elif len(nums) == 2:
+        return f"{nums[0]} + {nums[1]}"
+    elif len(nums) == 1:
+        return nums[0]
+    return text.strip()
 
 
 # ============================================================
@@ -195,7 +203,7 @@ def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> d
 
     parsers = {
         "lote": parse_lote,
-        "nome": parse_nome,
+        "nome": parse_condicao,
         "valor": parse_value,
     }
 
