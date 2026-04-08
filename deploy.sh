@@ -1,77 +1,144 @@
 #!/bin/bash
 # ============================================================
-# Deploy Script - OCR RemateWeb
+# Deploy Script - OCR RemateWeb (AWS EC2 / VPS)
 # ============================================================
-# Uso: ./deploy.sh SEU_DOMINIO.com SEU_EMAIL@email.com
+# Uso na instância EC2:
+#   1. SSH na instância
+#   2. curl -sSL https://raw.githubusercontent.com/Remateweb/OCR/main/deploy.sh | sudo bash
+#   Ou: chmod +x deploy.sh && sudo ./deploy.sh
 # ============================================================
 
 set -e
 
-DOMAIN=$1
-EMAIL=$2
+echo ""
+echo "============================================"
+echo "   OCR RemateWeb - Deploy Script"
+echo "============================================"
+echo ""
 
-if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
-    echo "❌ Uso: ./deploy.sh SEU_DOMINIO.com SEU_EMAIL@email.com"
-    exit 1
+# -----------------------------------------------
+# 1. Atualizar sistema e instalar dependências
+# -----------------------------------------------
+echo "[1/6] Atualizando sistema..."
+apt-get update -qq
+apt-get install -y --no-install-recommends \
+    git \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ffmpeg \
+    libgl1 \
+    libglib2.0-0 \
+    curl \
+    htop
+
+echo "    Sistema atualizado!"
+
+# -----------------------------------------------
+# 2. Clonar ou atualizar repositório
+# -----------------------------------------------
+echo "[2/6] Configurando repositório..."
+APP_DIR="/opt/ocr-remateweb"
+
+if [ -d "$APP_DIR" ]; then
+    echo "    Diretório já existe, atualizando..."
+    cd "$APP_DIR"
+    git pull origin main 2>/dev/null || git pull
+else
+    git clone https://github.com/Remateweb/OCR.git "$APP_DIR"
+    cd "$APP_DIR"
 fi
 
-echo "=========================================="
-echo "  Deploy OCR RemateWeb"
-echo "  Domínio: $DOMAIN"
-echo "  Email:   $EMAIL"
-echo "=========================================="
+echo "    Repositório configurado!"
 
-# 1. Substituir domínio nos arquivos de config
-echo "[1/6] Configurando domínio..."
-sed -i "s/SEU_DOMINIO.com/$DOMAIN/g" nginx/nginx.conf
-sed -i "s/SEU_DOMINIO.com/$DOMAIN/g" nginx/nginx-init.conf
+# -----------------------------------------------
+# 3. Criar ambiente virtual Python
+# -----------------------------------------------
+echo "[3/6] Configurando ambiente Python..."
+if [ ! -d "venv" ]; then
+    python3 -m venv venv
+fi
+source venv/bin/activate
 
-# 2. Criar diretórios necessários
-echo "[2/6] Criando diretórios..."
-mkdir -p data frames certbot/conf certbot/www
+pip install --upgrade pip -q
+pip install -r requirements.txt -q
 
-# 3. Usar config HTTP temporário para gerar SSL
-echo "[3/6] Subindo containers (HTTP)..."
-cp nginx/nginx.conf nginx/nginx-ssl.conf.bkp
-cp nginx/nginx-init.conf nginx/nginx.conf
+echo "    Ambiente Python configurado!"
 
-docker compose up -d --build
+# -----------------------------------------------
+# 4. Criar diretórios necessários
+# -----------------------------------------------
+echo "[4/6] Criando diretórios..."
+mkdir -p data frames output
 
-# Aguardar nginx subir
-echo "    Aguardando nginx..."
-sleep 10
+echo "    Diretórios criados!"
 
-# 4. Gerar certificado SSL
-echo "[4/6] Gerando certificado SSL com Let's Encrypt..."
-docker compose run --rm certbot certonly \
-    --webroot \
-    --webroot-path=/var/www/certbot \
-    --email $EMAIL \
-    --agree-tos \
-    --no-eff-email \
-    -d $DOMAIN
+# -----------------------------------------------
+# 5. Configurar serviço systemd
+# -----------------------------------------------
+echo "[5/6] Configurando serviço systemd..."
 
-# 5. Restaurar config HTTPS
-echo "[5/6] Ativando HTTPS..."
-cp nginx/nginx-ssl.conf.bkp nginx/nginx.conf
-rm nginx/nginx-ssl.conf.bkp
+cat > /etc/systemd/system/ocr-remateweb.service << 'SYSTEMD'
+[Unit]
+Description=OCR RemateWeb Service
+After=network.target
+Wants=network-online.target
 
-# 6. Reiniciar nginx com SSL
-echo "[6/6] Reiniciando nginx com SSL..."
-docker compose restart nginx
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ocr-remateweb
+Environment=PATH=/opt/ocr-remateweb/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DB_PATH=/opt/ocr-remateweb/data/ocr_rooms.db
+ExecStart=/opt/ocr-remateweb/venv/bin/uvicorn server:app --host 0.0.0.0 --port 80
+Restart=always
+RestartSec=5
 
-echo ""
-echo "=========================================="
-echo "  ✅ Deploy concluído!"
-echo "  Acesse: https://$DOMAIN"
-echo "=========================================="
-echo ""
-echo "Comandos úteis:"
-echo "  docker compose logs -f        # Ver logs"
-echo "  docker compose restart        # Reiniciar"
-echo "  docker compose down           # Parar tudo"
-echo "  docker compose up -d --build  # Rebuild"
-echo ""
-echo "Para renovar SSL manualmente:"
-echo "  docker compose run --rm certbot renew"
-echo "  docker compose restart nginx"
+# Logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ocr-remateweb
+
+# Limites
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD
+
+systemctl daemon-reload
+systemctl enable ocr-remateweb
+systemctl restart ocr-remateweb
+
+echo "    Serviço systemd configurado e iniciado!"
+
+# -----------------------------------------------
+# 6. Verificar
+# -----------------------------------------------
+echo "[6/6] Verificando..."
+sleep 3
+
+if systemctl is-active --quiet ocr-remateweb; then
+    IP=$(curl -s ifconfig.me 2>/dev/null || echo "SEU_IP")
+    echo ""
+    echo "============================================"
+    echo "   Deploy concluído com sucesso!"
+    echo ""
+    echo "   Acesse: http://$IP"
+    echo "============================================"
+    echo ""
+    echo "Comandos úteis:"
+    echo "  sudo systemctl status ocr-remateweb    # Status"
+    echo "  sudo journalctl -u ocr-remateweb -f    # Ver logs"
+    echo "  sudo systemctl restart ocr-remateweb   # Reiniciar"
+    echo "  sudo systemctl stop ocr-remateweb      # Parar"
+    echo ""
+    echo "Para atualizar código:"
+    echo "  cd /opt/ocr-remateweb && git pull && sudo systemctl restart ocr-remateweb"
+    echo ""
+else
+    echo ""
+    echo "  ERRO: Serviço não iniciou!"
+    echo "  Verifique: sudo journalctl -u ocr-remateweb -n 50"
+    echo ""
+fi

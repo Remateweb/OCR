@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# System dependencies: ffmpeg + libs for OpenCV
+# System dependencies: ffmpeg + libs for OpenCV + yt-dlp
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1 \
@@ -16,15 +16,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY server.py .
 COPY ocr_extractor.py .
-COPY ocr_extractor_paddle.py .
 COPY stream_manager.py .
 COPY static/ static/
 
 # Create directories for runtime data
-RUN mkdir -p frames output
-
-# Default to PaddleOCR (faster). Set OCR_ENGINE=easyocr to use EasyOCR.
-ENV OCR_ENGINE=paddle
+RUN mkdir -p frames output data
 
 # Expose port
 EXPOSE 8000

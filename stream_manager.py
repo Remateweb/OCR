@@ -88,65 +88,8 @@ class StreamManager:
 
         return self.resolved_url
 
-    def capture_single_frame(self) -> bytes:
-        """Captura um único frame do stream usando ffmpeg."""
-        if not self.resolved_url:
-            if not self.resolve_url():
-                return None
-
-        try:
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-i", self.resolved_url,
-                "-frames:v", "1",
-                "-f", "image2pipe",
-                "-vcodec", "mjpeg",
-                "-q:v", "2",
-                "-loglevel", "error",
-                "pipe:1"
-            ]
-
-            result = subprocess.run(
-                cmd, capture_output=True, timeout=5
-            )
-
-            if result.returncode == 0 and len(result.stdout) > 0:
-                frame_bytes = result.stdout
-                with self.frame_lock:
-                    self.current_frame = frame_bytes
-                # Salvar em disco
-                self._save_frame_to_disk(frame_bytes)
-                return frame_bytes
-            else:
-                self.error = f"ffmpeg error: {result.stderr.decode()[:200]}"
-                return None
-
-        except subprocess.TimeoutExpired:
-            self.error = "ffmpeg timeout capturando frame"
-            return None
-        except Exception as e:
-            self.error = str(e)
-            return None
-
-    def _capture_loop(self, interval: float):
-        """Loop de captura contínua de frames."""
-        fail_count = 0
-        while self.running:
-            frame = self.capture_single_frame()
-            if frame:
-                self.error = None
-                fail_count = 0
-            else:
-                fail_count += 1
-                # Após 3 falhas consecutivas, re-resolver URL
-                if fail_count % 3 == 0:
-                    print(f"[StreamManager] {self.room_id}: {fail_count} falhas, re-resolvendo URL...")
-                    self.resolve_url()
-            time.sleep(interval)
-
     def start(self, interval: float = 1.0):
-        """Inicia captura contínua de frames."""
+        """Inicia captura contínua com FFmpeg persistente."""
         if self.running:
             return
 
@@ -155,18 +98,151 @@ class StreamManager:
                 return
 
         self.running = True
+        self._start_ffmpeg_process(interval)
+
+    def _start_ffmpeg_process(self, interval: float = 1.0):
+        """Inicia um processo FFmpeg persistente que envia frames via pipe."""
+        fps = max(0.5, 1.0 / max(interval, 0.5))
+
+        cmd = [
+            "ffmpeg",
+            "-fflags", "+nobuffer",
+            "-probesize", "32768",
+            "-analyzeduration", "500000",
+        ]
+
+        # Reconnect flags só funcionam para HTTP/HLS, não RTMP
+        if self.stream_type in ("hls", "youtube", "direct"):
+            cmd += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+
+        cmd += [
+            "-i", self.resolved_url,
+            "-vf", f"fps={fps},scale=640:-1",
+            "-f", "image2pipe",
+            "-vcodec", "mjpeg",
+            "-q:v", "5",
+            "-loglevel", "warning",
+            "pipe:1"
+        ]
+
+        print(f"[StreamManager] {self.room_id}: Iniciando FFmpeg persistente (fps={fps})")
+        print(f"[StreamManager] CMD: {' '.join(cmd[:8])}...")
+
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1024 * 1024
+            )
+        except Exception as e:
+            self.error = f"Erro ao iniciar FFmpeg: {e}"
+            self.running = False
+            return
+
+        # Thread que lê frames do pipe
         self.capture_thread = threading.Thread(
-            target=self._capture_loop,
-            args=(interval,),
+            target=self._read_frames_from_pipe,
             daemon=True
         )
         self.capture_thread.start()
 
+        # Thread que monitora erros
+        self._error_thread = threading.Thread(
+            target=self._monitor_stderr,
+            daemon=True
+        )
+        self._error_thread.start()
+
+    def _read_frames_from_pipe(self):
+        """Lê frames JPEG continuamente do stdout do FFmpeg.
+        Detecta limites de JPEG pelos marcadores SOI (0xFFD8) e EOI (0xFFD9)."""
+        JPEG_SOI = b'\xff\xd8'
+        JPEG_EOI = b'\xff\xd9'
+        buffer = b''
+        fail_count = 0
+        frame_count = 0
+
+        while self.running and self.process and self.process.poll() is None:
+            try:
+                chunk = self.process.stdout.read(65536)
+                if not chunk:
+                    fail_count += 1
+                    if fail_count > 30:
+                        print(f"[StreamManager] {self.room_id}: Sem dados do FFmpeg, saindo...")
+                        break
+                    time.sleep(0.05)
+                    continue
+
+                fail_count = 0
+                buffer += chunk
+
+                # Procurar frames completos no buffer
+                while True:
+                    soi = buffer.find(JPEG_SOI)
+                    if soi == -1:
+                        buffer = b''
+                        break
+
+                    eoi = buffer.find(JPEG_EOI, soi + 2)
+                    if eoi == -1:
+                        buffer = buffer[soi:]
+                        break
+
+                    frame_bytes = buffer[soi:eoi + 2]
+                    buffer = buffer[eoi + 2:]
+
+                    if len(frame_bytes) > 500:
+                        frame_count += 1
+                        with self.frame_lock:
+                            self.current_frame = frame_bytes
+                        self._save_frame_to_disk(frame_bytes)
+                        self.error = None
+                        if frame_count <= 3 or frame_count % 30 == 0:
+                            print(f"[StreamManager] {self.room_id}: Frame #{frame_count} ({len(frame_bytes)} bytes)")
+
+            except Exception as e:
+                self.error = f"Erro lendo frames: {e}"
+                print(f"[StreamManager] {self.room_id}: Erro: {e}")
+                break
+
+        # FFmpeg morreu - tentar reconectar
+        if self.running:
+            print(f"[StreamManager] {self.room_id}: FFmpeg morreu, reconectando em 3s...")
+            time.sleep(3)
+            if self.running:
+                self.resolve_url()
+                self._start_ffmpeg_process()
+
+    def _monitor_stderr(self):
+        """Monitora stderr do FFmpeg para erros."""
+        if not self.process:
+            return
+        try:
+            for line in self.process.stderr:
+                if not self.running:
+                    break
+                line = line.decode('utf-8', errors='ignore').strip()
+                if line:
+                    print(f"[FFmpeg] {self.room_id}: {line[:200]}")
+        except Exception:
+            pass
+
     def stop(self):
-        """Para a captura."""
+        """Para a captura e mata o FFmpeg."""
         self.running = False
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=3)
+            except Exception:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+            self.process = None
         if self.capture_thread:
-            self.capture_thread.join(timeout=5)
+            self.capture_thread.join(timeout=3)
             self.capture_thread = None
 
     def _save_frame_to_disk(self, frame_bytes: bytes):

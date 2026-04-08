@@ -23,12 +23,7 @@ from typing import Optional
 
 from stream_manager import StreamManager
 
-# OCR Engine selection: 'paddle' (faster) or 'easyocr' (legacy)
-OCR_ENGINE = os.environ.get("OCR_ENGINE", "paddle").lower()
-if OCR_ENGINE == "easyocr":
-    from ocr_extractor import extract_from_bytes
-else:
-    from ocr_extractor_paddle import extract_from_bytes
+from ocr_extractor import extract_from_bytes
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -70,12 +65,18 @@ async def init_db():
                 y REAL NOT NULL,
                 width REAL NOT NULL,
                 height REAL NOT NULL,
+                stability_count INTEGER DEFAULT 3,
                 FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
             )
         """)
         # Migration: add value if missing
         try:
             await db.execute("ALTER TABLE regions ADD COLUMN value TEXT")
+        except:
+            pass
+        # Migration: add stability_count if missing
+        try:
+            await db.execute("ALTER TABLE regions ADD COLUMN stability_count INTEGER DEFAULT 3")
         except:
             pass
         await db.execute("""
@@ -480,8 +481,16 @@ async def set_stream(room_id: str, req: SetStreamRequest):
     if not resolved:
         return {"status": "error", "error": sm.error}
 
-    # Capture first frame
-    frame = sm.capture_single_frame()
+    # Start persistent FFmpeg capture
+    sm.start(interval=1.0)
+
+    # Aguardar primeiro frame (até 5s)
+    for _ in range(50):
+        if sm.get_current_frame():
+            break
+        await asyncio.sleep(0.1)
+
+    frame = sm.get_current_frame()
     if frame:
         return {
             "status": "ok",
@@ -491,7 +500,7 @@ async def set_stream(room_id: str, req: SetStreamRequest):
     else:
         return {
             "status": "error",
-            "error": sm.error,
+            "error": sm.error or "Timeout aguardando primeiro frame",
             "stream_type": sm.stream_type
         }
 
@@ -505,9 +514,6 @@ async def get_frame(room_id: str):
     sm = active_streams[room_id]
     frame = sm.get_current_frame()
 
-    if not frame:
-        # Tenta capturar um
-        frame = sm.capture_single_frame()
 
     if not frame:
         raise HTTPException(status_code=404, detail="Nenhum frame disponível")
@@ -585,8 +591,7 @@ async def test_ocr(room_id: str):
 
     sm = active_streams[room_id]
     frame = sm.get_current_frame()
-    if not frame:
-        frame = sm.capture_single_frame()
+
     if not frame:
         return {"error": "Sem frame", "stream_error": sm.error}
 
@@ -616,14 +621,15 @@ async def set_regions(room_id: str, req: SetRegionsRequest):
         for region in req.regions:
             region_id = str(uuid.uuid4())[:8]
             await db.execute(
-                "INSERT INTO regions (id, room_id, type, label, value, x, y, width, height) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO regions (id, room_id, type, label, value, x, y, width, height, stability_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     region_id, room_id,
                     region.get("type", "custom"),
                     region.get("label", ""),
                     region.get("value", region.get("type", "custom")),
                     region["x"], region["y"],
-                    region["width"], region["height"]
+                    region["width"], region["height"],
+                    region.get("stability_count", 3)
                 )
             )
 
@@ -1237,6 +1243,8 @@ async def ocr_loop(room_id: str, regions: list, interval: float):
                 logger.error(f"[OCR] Room {room_id}: OCR failed: {ocr_err}")
                 await asyncio.sleep(interval)
                 continue
+
+
 
             now = datetime.now().isoformat()
             prev = last_results.get(room_id)

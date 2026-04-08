@@ -704,6 +704,8 @@ function updateRegionValue(index, value) {
     saveRegions();
 }
 
+
+
 function removeRegion(index) {
     regions.splice(index, 1);
     updateRegionsList();

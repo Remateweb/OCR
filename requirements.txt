@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-opencv-python
+opencv-python-headless
 numpy
 requests
 httpx
@@ -8,5 +8,5 @@ python-multipart
 yt-dlp
 aiosqlite
 psutil
-paddlepaddle
-paddleocr
+easyocr
+Pillow
