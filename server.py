@@ -633,6 +633,12 @@ async def set_regions(room_id: str, req: SetRegionsRequest):
         )
         await db.commit()
 
+    # Limpar debug crops antigos para evitar arquivos de regioes removidas
+    debug_dir = os.path.join("frames", room_id, "debug")
+    if os.path.exists(debug_dir):
+        import shutil
+        shutil.rmtree(debug_dir, ignore_errors=True)
+
     return {"status": "ok", "count": len(req.regions)}
 
 

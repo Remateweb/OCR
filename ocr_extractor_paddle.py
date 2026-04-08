@@ -6,7 +6,10 @@ Usa PaddleOCR (Baidu) para leitura otimizada em CPU.
 """
 
 from paddleocr import PaddleOCR
-from PIL import Image
+from PIL import Image, ImageFile
+
+# Permitir frames JPEG truncados (captura ao vivo pode gerar frames incompletos)
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 import cv2
 import numpy as np
 import re
