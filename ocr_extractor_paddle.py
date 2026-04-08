@@ -78,32 +78,27 @@ def preprocess_region(img_pil, invert=False):
 # Extraction
 # ============================================================
 
-def extract_text_from_region(img: Image.Image, region: dict, room_id: str = "") -> tuple:
-    """Extrai texto e confianca de uma regiao especifica da imagem.
-    Retorna (texto, confianca) onde confianca e 0-100."""
+def _crop_region(img: Image.Image, region: dict, room_id: str = "") -> tuple:
+    """Recorta e pre-processa uma regiao (thread-safe: retorna numpy independente).
+    Retorna (region_type, ocr_input, room_id) ou None se invalido."""
     w, h = img.size
     region_type = region.get("type", "custom")
 
-    # Converter coordenadas relativas para absolutas
     x1 = int(region["x"] * w)
     y1 = int(region["y"] * h)
     x2 = int((region["x"] + region["width"]) * w)
     y2 = int((region["y"] + region["height"]) * h)
 
-    # Limitar aos bounds
     x1 = max(0, min(x1, w))
     y1 = max(0, min(y1, h))
     x2 = max(0, min(x2, w))
     y2 = max(0, min(y2, h))
 
     if x2 <= x1 or y2 <= y1:
-        return "", 0
+        return None
 
     cropped = img.crop((x1, y1, x2, y2))
-
-    # Regioes de leilao sempre tem texto claro em fundo escuro
     should_invert = region_type in ("lote", "valor", "nome")
-
     processed, clean = preprocess_region(cropped, invert=should_invert)
 
     # Salvar debug crops
@@ -119,25 +114,29 @@ def extract_text_from_region(img: Image.Image, region: dict, room_id: str = "") 
         except Exception:
             pass
 
-    # Rodar PaddleOCR (v3.4 usa predict())
+    # Converter para BGR numpy (independente, seguro para threads)
+    if len(processed.shape) == 2:
+        ocr_input = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
+    else:
+        ocr_input = processed.copy()
+
+    return (region_type, ocr_input)
+
+
+def _run_ocr(ocr_input, region_type: str) -> tuple:
+    """Roda PaddleOCR num crop ja preparado. Thread-safe (numpy independente).
+    Retorna (texto, confianca)."""
     reader = get_reader()
     try:
-        # PaddleOCR espera BGR numpy array
-        if len(processed.shape) == 2:
-            ocr_input = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
-        else:
-            ocr_input = processed
-
         results = list(reader.predict(ocr_input))
     except Exception as e:
         logger.error(f"[OCR-PADDLE] Erro: {e}")
         return "", 0
 
-    # Processar resultados (v3.4: OCRResult com rec_texts e rec_scores)
     if not results:
         return "", 0
 
-    result = results[0]  # primeiro (e unico) resultado
+    result = results[0]
     rec_texts = result.get("rec_texts", [])
     rec_scores = result.get("rec_scores", [])
 
@@ -150,7 +149,6 @@ def extract_text_from_region(img: Image.Image, region: dict, room_id: str = "") 
     full_text = " ".join(texts)
     avg_conf = int((sum(confs) / len(confs)) * 100) if confs else 0
 
-    # Debug detalhado para lote
     if region_type == "lote":
         logger.info(f"[OCR-PADDLE-LOTE] Textos: {list(zip(texts, [round(c,2) for c in confs]))}")
         logger.info(f"[OCR-PADDLE-LOTE] Texto: '{full_text}' | Conf: {avg_conf}%")
@@ -163,13 +161,11 @@ def extract_text_from_region(img: Image.Image, region: dict, room_id: str = "") 
 # ============================================================
 
 def parse_value(text: str) -> str:
-    """Extrai valor monetario do texto."""
     m = re.search(r"R?\$?\s*([\d]+[.,]?[\d]*)", text)
     return m.group(1) if m else text.strip()
 
 
 def parse_lote(text: str) -> str:
-    """Extrai numero do lote do texto."""
     text = text.replace('º', '').replace('°', '').replace('ª', '')
     m = re.search(r"LOTE\s*(\d+)", text, re.IGNORECASE)
     if m:
@@ -183,7 +179,6 @@ def parse_lote(text: str) -> str:
 
 
 def parse_nome(text: str) -> str:
-    """Limpa o nome."""
     lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 3]
     return " | ".join(lines) if lines else text.strip()
 
@@ -191,9 +186,13 @@ def parse_nome(text: str) -> str:
 # ============================================================
 # Main (mesma interface que ocr_extractor.py)
 # ============================================================
+from concurrent.futures import ThreadPoolExecutor
+
+_thread_pool = ThreadPoolExecutor(max_workers=4)
+
 
 def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> dict:
-    """Extrai dados de todas as regioes definidas."""
+    """Extrai dados de todas as regioes (crop sequencial, OCR paralelo)."""
     results = {}
     raw = {}
     confidence = {}
@@ -204,9 +203,23 @@ def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> d
         "valor": parse_value,
     }
 
+    # 1. Pre-crop no thread principal (PIL nao e thread-safe)
+    crops = []
     for region in regions:
-        region_type = region.get("type", "custom")
-        text, conf = extract_text_from_region(img, region, room_id=room_id)
+        crop_data = _crop_region(img, region, room_id=room_id)
+        if crop_data:
+            crops.append(crop_data)
+
+    # 2. OCR em paralelo (cada thread recebe numpy independente)
+    def ocr_task(crop_data):
+        region_type, ocr_input = crop_data
+        text, conf = _run_ocr(ocr_input, region_type)
+        return region_type, text, conf
+
+    futures = [_thread_pool.submit(ocr_task, c) for c in crops]
+
+    for future in futures:
+        region_type, text, conf = future.result()
         raw[region_type] = text
         confidence[region_type] = conf
 
@@ -227,5 +240,6 @@ def extract_from_bytes(frame_bytes: bytes, regions: list, room_id: str = "") -> 
     """Extrai dados de um frame em bytes JPEG."""
     img = Image.open(io.BytesIO(frame_bytes))
     return extract_all_regions(img, regions, room_id=room_id)
+
 
 
