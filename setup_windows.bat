@@ -54,7 +54,7 @@ call venv\Scripts\activate.bat
 REM Instalar PyTorch com CUDA
 echo [3/4] Instalando dependencias (pode demorar 5-10 min)...
 pip install --upgrade pip -q
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118 -q
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 -q
 pip install -r requirements.txt -q
 
 REM Criar diretorios
