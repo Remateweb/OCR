@@ -26,16 +26,29 @@ logger = logging.getLogger(__name__)
 _reader = None
 
 
+def _has_gpu():
+    """Detecta se há GPU CUDA disponível."""
+    try:
+        import torch
+        available = torch.cuda.is_available()
+        if available:
+            logger.info(f"[OCR] GPU detectada: {torch.cuda.get_device_name(0)}")
+        return available
+    except ImportError:
+        return False
+
+
 def get_reader():
     """Retorna o reader EasyOCR (singleton para não recarregar modelo)."""
     global _reader
     if _reader is None:
-        logger.info("[OCR] Carregando modelo EasyOCR (primeira vez)...")
+        use_gpu = _has_gpu()
+        logger.info(f"[OCR] Carregando modelo EasyOCR (GPU={use_gpu})...")
         _reader = easyocr.Reader(
             ['en'],          # 'en' basta para números e texto simples de overlay
-            gpu=False,
+            gpu=use_gpu,
             verbose=False,
-            quantize=True,   # Quantização para inferência mais rápida em CPU
+            quantize=not use_gpu,  # Quantização só em CPU (GPU não precisa)
         )
         logger.info("[OCR] Modelo EasyOCR carregado!")
     return _reader
