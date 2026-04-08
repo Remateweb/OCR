@@ -1321,8 +1321,9 @@ async function refreshDebugImages() {
         let html = '';
         for (const [type, typeFiles] of Object.entries(groups)) {
             const color = REGION_COLORS[type] || REGION_COLORS.lote;
+            const displayName = REGION_LABELS[type] || type;
             html += `<div style="margin-bottom: 0.5rem;">
-                <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: ${color.text}; margin-bottom: 0.3rem;">${type}</div>
+                <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: ${color.text}; margin-bottom: 0.3rem;">${displayName}</div>
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">`;
             for (const file of typeFiles) {
                 const label = file.includes('raw') ? 'Raw' : file.includes('processed') ? 'Processado' : file.split('_').pop().replace('.png', '');
