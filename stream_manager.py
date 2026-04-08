@@ -170,11 +170,13 @@ class StreamManager:
             self.capture_thread = None
 
     def _save_frame_to_disk(self, frame_bytes: bytes):
-        """Salva o último frame em disco."""
+        """Salva o último frame em disco (escrita atômica)."""
         try:
             latest_path = os.path.join(self.room_frames_dir, "latest.jpg")
-            with open(latest_path, "wb") as f:
+            tmp_path = latest_path + ".tmp"
+            with open(tmp_path, "wb") as f:
                 f.write(frame_bytes)
+            os.replace(tmp_path, latest_path)  # atômico no mesmo filesystem
         except Exception as e:
             print(f"[StreamManager] Erro ao salvar frame em disco: {e}")
 
