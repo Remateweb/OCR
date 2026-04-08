@@ -186,13 +186,9 @@ def parse_nome(text: str) -> str:
 # ============================================================
 # Main (mesma interface que ocr_extractor.py)
 # ============================================================
-from concurrent.futures import ThreadPoolExecutor
-
-_thread_pool = ThreadPoolExecutor(max_workers=4)
-
 
 def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> dict:
-    """Extrai dados de todas as regioes (crop sequencial, OCR paralelo)."""
+    """Extrai dados de todas as regioes definidas."""
     results = {}
     raw = {}
     confidence = {}
@@ -203,23 +199,17 @@ def extract_all_regions(img: Image.Image, regions: list, room_id: str = "") -> d
         "valor": parse_value,
     }
 
-    # 1. Pre-crop no thread principal (PIL nao e thread-safe)
-    crops = []
     for region in regions:
+        region_type = region.get("type", "custom")
         crop_data = _crop_region(img, region, room_id=room_id)
-        if crop_data:
-            crops.append(crop_data)
+        if not crop_data:
+            raw[region_type] = ""
+            confidence[region_type] = 0
+            results[region_type] = "0"
+            continue
 
-    # 2. OCR em paralelo (cada thread recebe numpy independente)
-    def ocr_task(crop_data):
-        region_type, ocr_input = crop_data
+        _, ocr_input = crop_data
         text, conf = _run_ocr(ocr_input, region_type)
-        return region_type, text, conf
-
-    futures = [_thread_pool.submit(ocr_task, c) for c in crops]
-
-    for future in futures:
-        region_type, text, conf = future.result()
         raw[region_type] = text
         confidence[region_type] = conf
 
@@ -240,6 +230,4 @@ def extract_from_bytes(frame_bytes: bytes, regions: list, room_id: str = "") -> 
     """Extrai dados de um frame em bytes JPEG."""
     img = Image.open(io.BytesIO(frame_bytes))
     return extract_all_regions(img, regions, room_id=room_id)
-
-
 
