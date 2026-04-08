@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - OCR Live Stream</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            background: #0d1117;
+        }
+
+        /* ── Left Panel ── */
+        .left-panel {
+            flex: 1;
+            background: linear-gradient(160deg, #0d1117 0%, #111d2b 40%, #0f2922 70%, #0d1117 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 2.5rem 3rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .left-panel::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -30%;
+            width: 80%;
+            height: 120%;
+            background: radial-gradient(ellipse, rgba(108,92,231,0.08) 0%, transparent 60%);
+            pointer-events: none;
+        }
+        .left-panel::after {
+            content: '';
+            position: absolute;
+            bottom: -20%;
+            right: -10%;
+            width: 60%;
+            height: 80%;
+            background: radial-gradient(ellipse, rgba(0,210,140,0.07) 0%, transparent 60%);
+            pointer-events: none;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            position: relative;
+            z-index: 1;
+        }
+        .brand-icon {
+            width: 36px;
+            height: 36px;
+            background: rgba(108,92,231,0.15);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c5ce7;
+        }
+        .brand-name {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #e0e0e8;
+            letter-spacing: -0.02em;
+        }
+        .hero {
+            position: relative;
+            z-index: 1;
+            max-width: 480px;
+        }
+        .hero h1 {
+            font-size: 2.6rem;
+            font-weight: 800;
+            line-height: 1.15;
+            color: #f0f0f5;
+            letter-spacing: -0.03em;
+            margin-bottom: 1.2rem;
+        }
+        .hero h1 .highlight {
+            color: #00d28a;
+        }
+        .hero p {
+            font-size: 0.95rem;
+            color: #8b8fa3;
+            line-height: 1.6;
+            margin-bottom: 2.5rem;
+        }
+        .features {
+            display: flex;
+            gap: 0.8rem;
+        }
+        .feature-card {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 0.75rem;
+            padding: 1.1rem 1.3rem;
+            min-width: 130px;
+            transition: all 0.3s;
+        }
+        .feature-card:hover {
+            background: rgba(255,255,255,0.07);
+            border-color: rgba(255,255,255,0.1);
+            transform: translateY(-2px);
+        }
+        .feature-card .feat-icon {
+            color: #00d28a;
+            margin-bottom: 0.6rem;
+        }
+        .feature-card .feat-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #e0e0e8;
+        }
+        .feature-card .feat-sub {
+            font-size: 0.72rem;
+            color: #6b7080;
+            margin-top: 0.15rem;
+        }
+        .footer-text {
+            font-size: 0.72rem;
+            color: #3d4050;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Right Panel ── */
+        .right-panel {
+            width: 480px;
+            min-width: 420px;
+            background: #fafbfc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem;
+        }
+        .login-form-wrapper {
+            width: 100%;
+            max-width: 360px;
+        }
+        .login-form-wrapper h2 {
+            font-size: 1.55rem;
+            font-weight: 700;
+            color: #1a1d28;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.35rem;
+        }
+        .login-form-wrapper .subtitle {
+            font-size: 0.85rem;
+            color: #888;
+            margin-bottom: 2rem;
+        }
+
+        .field-group {
+            margin-bottom: 1.1rem;
+        }
+        .field-group label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #555;
+            margin-bottom: 0.4rem;
+        }
+        .input-wrapper {
+            display: flex;
+            align-items: center;
+            background: #f0ecd8;
+            border: 1.5px solid #e8e3cc;
+            border-radius: 0.6rem;
+            padding: 0 0.85rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .input-wrapper:focus-within {
+            border-color: #00d28a;
+            box-shadow: 0 0 0 3px rgba(0,210,138,0.1);
+        }
+        .input-wrapper .field-icon {
+            color: #999;
+            flex-shrink: 0;
+        }
+        .input-wrapper input {
+            flex: 1;
+            border: none;
+            background: none;
+            padding: 0.75rem 0.7rem;
+            font-size: 0.9rem;
+            color: #1a1d28;
+            outline: none;
+            font-family: inherit;
+        }
+        .input-wrapper input::placeholder {
+            color: #bbb;
+        }
+        .toggle-password {
+            background: none;
+            border: none;
+            color: #999;
+            cursor: pointer;
+            padding: 0.3rem;
+            display: flex;
+            align-items: center;
+        }
+        .toggle-password:hover { color: #666; }
+
+        .login-btn {
+            width: 100%;
+            padding: 0.85rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-top: 1.2rem;
+            cursor: pointer;
+            border: none;
+            border-radius: 0.6rem;
+            background: #1a2332;
+            color: #fff;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            font-family: inherit;
+        }
+        .login-btn:hover {
+            background: #243040;
+            transform: translateY(-1px);
+        }
+        .login-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .login-btn .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            display: none;
+        }
+        .login-btn.loading .spinner { display: block; }
+        .login-btn.loading .btn-text { display: none; }
+        .login-btn.loading .btn-arrow { display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .error-msg {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: #dc2626;
+            padding: 0.65rem 0.85rem;
+            border-radius: 0.5rem;
+            font-size: 0.8rem;
+            margin-bottom: 1rem;
+            display: none;
+            text-align: center;
+        }
+        .error-msg.show { display: block; }
+
+        /* ── Responsive ── */
+        @media (max-width: 900px) {
+            body { flex-direction: column; }
+            .left-panel {
+                padding: 2rem;
+                min-height: auto;
+            }
+            .hero h1 { font-size: 1.8rem; }
+            .right-panel {
+                width: 100%;
+                min-width: unset;
+                padding: 2rem;
+            }
+            .features { flex-wrap: wrap; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Left Panel -->
+    <div class="left-panel">
+        <div class="brand">
+            <div class="brand-icon">
+                <i data-lucide="scan-text" style="width:20px;height:20px;"></i>
+            </div>
+            <span class="brand-name">RemateWeb OCR</span>
+        </div>
+
+        <div class="hero">
+            <h1>
+                Monitore seus leilões com
+                <span class="highlight">extração automática</span>
+                em tempo real.
+            </h1>
+            <p>
+                Lotes, lances, condições de pagamento e relatórios
+                completos — tudo extraído diretamente do stream ao vivo.
+            </p>
+            <div class="features">
+                <div class="feature-card">
+                    <div class="feat-icon"><i data-lucide="scan-text" style="width:20px;height:20px;"></i></div>
+                    <div class="feat-title">OCR</div>
+                    <div class="feat-sub">Tempo real</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feat-icon"><i data-lucide="bar-chart-3" style="width:20px;height:20px;"></i></div>
+                    <div class="feat-title">Relatórios</div>
+                    <div class="feat-sub">Completos</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feat-icon"><i data-lucide="radio" style="width:20px;height:20px;"></i></div>
+                    <div class="feat-title">Streams</div>
+                    <div class="feat-sub">Monitoramento</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-text">© 2026 RemateWeb · Todos os direitos reservados</div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel">
+        <div class="login-form-wrapper">
+            <h2>Entrar na sua conta</h2>
+            <p class="subtitle">Bem-vindo de volta! Entre com suas credenciais.</p>
+
+            <div class="error-msg" id="error-msg"></div>
+
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <div class="field-group">
+                    <label for="username">Email</label>
+                    <div class="input-wrapper">
+                        <i data-lucide="mail" style="width:16px;height:16px;" class="field-icon"></i>
+                        <input type="text" id="username" placeholder="seu@email.com" autofocus required>
+                    </div>
+                </div>
+                <div class="field-group">
+                    <label for="password">Senha</label>
+                    <div class="input-wrapper">
+                        <i data-lucide="lock" style="width:16px;height:16px;" class="field-icon"></i>
+                        <input type="password" id="password" placeholder="••••••••" required>
+                        <button type="button" class="toggle-password" onclick="togglePassword()">
+                            <i data-lucide="eye" style="width:16px;height:16px;" id="eye-icon"></i>
+                        </button>
+                    </div>
+                </div>
+                <button type="submit" class="login-btn" id="login-btn">
+                    <span class="btn-text">Entrar</span>
+                    <span class="btn-arrow">→</span>
+                    <div class="spinner"></div>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const REMATEWEB_API = 'https://test.api-net9.remateweb.com';
+
+        // If already logged in, redirect
+        if (localStorage.getItem('ocr_token')) {
+            window.location.href = '/';
+        }
+
+        function togglePassword() {
+            const input = document.getElementById('password');
+            const icon = document.getElementById('eye-icon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.setAttribute('data-lucide', 'eye-off');
+            } else {
+                input.type = 'password';
+                icon.setAttribute('data-lucide', 'eye');
+            }
+            lucide.createIcons();
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            const errorEl = document.getElementById('error-msg');
+            errorEl.classList.remove('show');
+            btn.classList.add('loading');
+            btn.disabled = true;
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.error || 'Erro ao autenticar');
+                }
+
+                // Store token and redirect
+                localStorage.setItem('ocr_token', data.access_token);
+                localStorage.setItem('ocr_user', JSON.stringify(data.user));
+                window.location.href = '/';
+
+            } catch (err) {
+                errorEl.textContent = err.message;
+                errorEl.classList.add('show');
+            } finally {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+            }
+        }
+
+        lucide.createIcons();
+    </script>
+</body>
+</html>

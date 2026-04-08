@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+easyocr
+opencv-python
+numpy
+requests
+httpx
+python-multipart
+yt-dlp
+aiosqlite
+psutil

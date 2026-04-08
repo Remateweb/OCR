@@ -1,0 +1,12 @@
+services:
+  ocr-app:
+    build: .
+    container_name: ocr-remateweb
+    restart: unless-stopped
+    ports:
+      - "80:8000"
+    volumes:
+      - ./data:/app/data
+      - ./frames:/app/frames
+    environment:
+      - DB_PATH=/app/data/ocr_rooms.db

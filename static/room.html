@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sala - OCR Live Stream</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-left">
+                <a href="/" class="btn btn-outline btn-sm" style="text-decoration:none;">
+                    <i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Voltar
+                </a>
+                <div>
+                    <h1 id="room-name">Carregando...</h1>
+                    <div class="connection-status disconnected" id="ws-status">
+                        <span class="status-dot idle"></span> Desconectado
+                    </div>
+                </div>
+            </div>
+            <div class="controls-bar">
+                <button class="btn btn-danger btn-sm" id="btn-delete" onclick="deleteRoom()">
+                    <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Excluir
+                </button>
+            </div>
+        </header>
+
+        <!-- Stream URL Input -->
+        <div class="card" style="margin-bottom: 1rem;" id="stream-config">
+            <div class="card-header">
+                <h3><i data-lucide="radio" style="width:18px;height:18px;vertical-align:middle;margin-right:6px;"></i>Configurar Stream</h3>
+            </div>
+            <div class="input-group">
+                <input type="text" id="stream-url" class="input" placeholder="Cole aqui a URL do YouTube Live ou RTMP...">
+                <button class="btn btn-primary" id="btn-connect" onclick="connectStream()">
+                    <i data-lucide="play" style="width:14px;height:14px;"></i> Conectar
+                </button>
+                <button class="btn btn-outline btn-sm" id="btn-restart" onclick="restartStream()" style="display:none;" title="Reiniciar stream e OCR">
+                    <i data-lucide="rotate-cw" style="width:14px;height:14px;"></i>
+                </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.8rem;margin-top:0.6rem;">
+                <label style="margin:0;white-space:nowrap;font-size:0.82rem;">Auction ID:</label>
+                <input type="text" id="auction-id" class="input" placeholder="ID do leilão" style="max-width:250px;font-family:monospace;">
+                <button class="btn btn-outline btn-sm" onclick="saveAuctionId()">
+                    <i data-lucide="save" style="width:13px;height:13px;"></i> Salvar
+                </button>
+            </div>
+            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top:0.4rem;">
+                Suporta: YouTube Live, RTMP, HLS (m3u8)
+            </div>
+        </div>
+
+        <!-- Main Layout -->
+        <div class="room-layout">
+            <!-- Main Panel - Preview + Controls -->
+            <div class="main-panel">
+                <!-- Toolbar unificada -->
+                <div class="toolbar" id="region-toolbar" style="align-items:center;flex-wrap:nowrap;overflow-x:auto;">
+                    <button class="tool-btn lote" data-type="lote" onclick="setTool('lote')">
+                        <i data-lucide="hash" style="width:14px;height:14px;"></i> Lote
+                    </button>
+                    <button class="tool-btn nome" data-type="nome" onclick="setTool('nome')">
+                        <i data-lucide="credit-card" style="width:14px;height:14px;"></i> Pagamento
+                    </button>
+                    <button class="tool-btn valor" data-type="valor" onclick="setTool('valor')">
+                        <i data-lucide="dollar-sign" style="width:14px;height:14px;"></i> Valor
+                    </button>
+                    <button class="tool-btn" id="btn-add-field" onclick="addCustomField()" style="border: 1px dashed var(--border); opacity: 0.7;" title="Adicionar campo personalizado">
+                        <i data-lucide="plus" style="width:14px;height:14px;"></i>
+                    </button>
+
+                    <div class="toolbar-sep"></div>
+
+                    <button class="tool-btn" onclick="clearRegions()">
+                        <i data-lucide="trash" style="width:13px;height:13px;"></i> Limpar
+                    </button>
+                    <button class="tool-btn" onclick="saveRegions()">
+                        <i data-lucide="save" style="width:13px;height:13px;"></i> Salvar
+                    </button>
+                    <button class="tool-btn" id="btn-refresh-frame" onclick="refreshFrame()">
+                        <i data-lucide="refresh-cw" style="width:13px;height:13px;"></i> Frame
+                    </button>
+
+                    <div class="toolbar-sep"></div>
+
+                    <select id="template-select" style="background:transparent;border:none;color:var(--text-secondary);font-family:inherit;font-size:0.8rem;padding:0.4rem 0.5rem;outline:none;cursor:pointer;min-width:160px;" onchange="applyTemplate()">
+                        <option value="">Selecionar template...</option>
+                    </select>
+                    <button class="tool-btn" onclick="deleteSelectedTemplate()" title="Excluir template selecionado" id="btn-delete-template" style="display:none;">
+                        <i data-lucide="trash-2" style="width:13px;height:13px;color:var(--red);"></i>
+                    </button>
+                    <button class="tool-btn" onclick="openSaveTemplateModal()" title="Salvar regiões atuais como template" style="white-space:nowrap;">
+                        <i data-lucide="bookmark-plus" style="width:13px;height:13px;"></i> Salvar Template
+                    </button>
+                </div>
+
+                <!-- Preview Container -->
+                <div class="preview-container" id="preview-container">
+                    <img id="preview-img" style="display:none;" alt="Stream preview">
+                    <canvas id="region-canvas"></canvas>
+                    <div class="preview-placeholder" id="preview-placeholder">
+                        <div class="icon"><i data-lucide="monitor-play" style="width:48px;height:48px;opacity:0.3;"></i></div>
+                        <p>Conecte um stream para ver o preview aqui.</p>
+                        <p style="font-size: 0.78rem;">Depois, selecione as regiões de extração com a toolbar acima.</p>
+                    </div>
+                </div>
+
+                <!-- Interval Control -->
+                <div class="card" style="padding: 0.8rem 1.2rem;">
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <label style="margin: 0; white-space: nowrap;">Intervalo OCR:</label>
+                        <input type="range" id="interval-slider" min="0.5" max="10" step="0.5" value="1" oninput="updateIntervalLabel()">
+                        <span id="interval-label" style="font-weight: 700; min-width: 3rem; text-align: center;">1.0s</span>
+                        <button class="btn btn-outline btn-sm" onclick="saveInterval()">Salvar</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Side Panel - Data + Regions + Log -->
+            <div class="side-panel">
+                <!-- Live Data -->
+                <div class="card data-card lote">
+                    <div class="data-label"><i data-lucide="hash" style="width:13px;height:13px;"></i> Lote <span class="conf-badge" id="conf-lote"></span></div>
+                    <div class="data-value lote" id="data-lote">—</div>
+                </div>
+                <div class="card data-card nome">
+                    <div class="data-label"><i data-lucide="credit-card" style="width:13px;height:13px;"></i> Condição de Pagamento <span class="conf-badge" id="conf-nome"></span></div>
+                    <div class="data-value nome" id="data-nome">—</div>
+                </div>
+                <div class="card data-card valor">
+                    <div class="data-label"><i data-lucide="banknote" style="width:13px;height:13px;"></i> Valor do Lance <span class="conf-badge" id="conf-valor"></span></div>
+                    <div class="data-value valor" id="data-valor">—</div>
+                </div>
+
+                <!-- Regions List -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i data-lucide="crosshair" style="width:16px;height:16px;vertical-align:middle;margin-right:4px;"></i> Regiões Definidas</h3>
+                        <span style="font-size: 0.78rem; color: var(--text-muted);" id="regions-count">0 regiões</span>
+                    </div>
+                    <div class="regions-list" id="regions-list">
+                        <div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 1rem;">
+                            Selecione uma ferramenta e desenhe na imagem
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lot Report -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i data-lucide="clipboard-list" style="width:16px;height:16px;vertical-align:middle;margin-right:4px;"></i> Relatorio de Lotes <span id="report-count" style="font-size:0.75rem;color:var(--text-muted);margin-left:4px;">0</span></h3>
+                        <div style="display:flex;gap:0.3rem;">
+                            <button class="btn btn-outline btn-sm" onclick="exportLotReport()" title="Exportar JSON">
+                                <i data-lucide="download" style="width:12px;height:12px;"></i>
+                            </button>
+                            <button class="btn btn-outline btn-sm" onclick="clearLotReport()" title="Limpar">
+                                <i data-lucide="trash" style="width:12px;height:12px;"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="report-lots" style="max-height:400px;overflow-y:auto;">
+                        <div class="report-empty" style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:0.7rem;">
+                            Aguardando dados do lote
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Payload Preview -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i data-lucide="braces" style="width:16px;height:16px;vertical-align:middle;margin-right:4px;"></i> Payload</h3>
+                        <span style="font-size: 0.7rem; color: var(--text-muted);">POST automático na troca de lote</span>
+                    </div>
+                    <pre id="payload-json" style="margin:0;padding:0.6rem;background:var(--bg);border-radius:var(--radius-sm);font-size:0.75rem;color:var(--accent);overflow-x:auto;max-height:120px;">{}</pre>
+                </div>
+
+                <!-- POST Log -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i data-lucide="send" style="width:16px;height:16px;vertical-align:middle;margin-right:4px;"></i> Log de POST</h3>
+                    </div>
+                    <div id="payload-log" style="max-height:200px;overflow-y:auto;">
+                        <div style="color: var(--text-muted); font-size: 0.8rem; text-align: center; padding: 0.5rem;">
+                            Aguardando troca de lote
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Debug Crops -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i data-lucide="scan-search" style="width:16px;height:16px;vertical-align:middle;margin-right:4px;"></i> Debug Crops</h3>
+                        <button class="btn btn-outline btn-sm" onclick="refreshDebugImages()">
+                            <i data-lucide="refresh-cw" style="width:12px;height:12px;"></i>
+                        </button>
+                    </div>
+                    <div id="debug-crops" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 0.5rem;">
+                            Inicie a extração para ver os crops
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Custom Field Modal -->
+    <div class="modal-overlay" id="custom-field-modal">
+        <div class="modal">
+            <h2><i data-lucide="plus-circle" style="width:22px;height:22px;color:var(--accent);vertical-align:middle;margin-right:6px;"></i>Novo Campo</h2>
+            <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1rem;">
+                Adicione um campo personalizado para extrair informações adicionais do stream.
+            </p>
+            <div style="display:flex;flex-direction:column;gap:0.8rem;">
+                <div>
+                    <label for="cf-name">Nome do campo</label>
+                    <input type="text" id="cf-name" class="input" placeholder="Ex: Nome do Animal, Raça, Pai">
+                </div>
+                <div>
+                    <label for="cf-key">Chave no payload (API)</label>
+                    <input type="text" id="cf-key" class="input" placeholder="Ex: nome_animal, raca" style="font-family:monospace;">
+                    <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.2rem;">Letras minúsculas, sem espaços. Será preenchida automaticamente.</div>
+                </div>
+                <div>
+                    <label for="cf-type">Tipo de conteúdo</label>
+                    <select id="cf-type" class="input" style="padding:0.5rem 0.8rem;">
+                        <option value="text">Texto livre</option>
+                        <option value="number">Número</option>
+                        <option value="currency">Valor monetário (R$)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-outline" onclick="closeCustomFieldModal()">Cancelar</button>
+                <button class="btn btn-primary" onclick="confirmAddCustomField()">
+                    <i data-lucide="plus" style="width:14px;height:14px;"></i> Adicionar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="delete-modal">
+        <div class="modal">
+            <h2><i data-lucide="alert-triangle" style="width:22px;height:22px;color:var(--red);vertical-align:middle;margin-right:6px;"></i>Excluir Sala</h2>
+            <p style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 0.5rem;">
+                Tem certeza que deseja excluir esta sala? Esta ação é <strong style="color: var(--red);">irreversível</strong>.
+            </p>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Todos os dados de extração e regiões serão perdidos.</p>
+            <div class="btn-row">
+                <button class="btn btn-outline" onclick="closeDeleteModal()">Cancelar</button>
+                <button class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDeleteRoom()">
+                    <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Excluir
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Template Modal -->
+    <div class="modal-overlay" id="save-template-modal">
+        <div class="modal">
+            <h2><i data-lucide="layout-template" style="width:22px;height:22px;color:var(--accent);vertical-align:middle;margin-right:6px;"></i>Salvar Template</h2>
+            <p style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 1rem;">
+                Salve as regiões atuais como um template reutilizável para aplicar em outras salas.
+            </p>
+            <div style="margin-bottom: 1rem;">
+                <label for="template-name-input">Nome do Template</label>
+                <input type="text" class="input" id="template-name-input" placeholder="Ex: Canal Rural, Lance Rural..." autofocus>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-outline" onclick="closeSaveTemplateModal()">Cancelar</button>
+                <button class="btn btn-primary" id="btn-confirm-save-template" onclick="confirmSaveTemplate()">
+                    <i data-lucide="check" style="width:14px;height:14px;"></i> Salvar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic Confirm Dialog -->
+    <div class="modal-overlay" id="confirm-dialog">
+        <div class="modal">
+            <h2><i data-lucide="alert-triangle" style="width:22px;height:22px;color:var(--yellow);vertical-align:middle;margin-right:6px;"></i><span id="confirm-dialog-title">Confirmar</span></h2>
+            <p id="confirm-dialog-message" style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 0.5rem;"></p>
+            <div class="btn-row">
+                <button class="btn btn-outline" id="confirm-dialog-cancel">Cancelar</button>
+                <button class="btn btn-danger" id="confirm-dialog-ok">
+                    <i data-lucide="check" style="width:14px;height:14px;"></i> Confirmar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // Auth guard
+        (async function checkAuth() {
+            const token = localStorage.getItem('ocr_token');
+            if (!token) { window.location.href = '/login'; return; }
+            try {
+                const res = await fetch('/api/auth/check', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!res.ok) { localStorage.removeItem('ocr_token'); localStorage.removeItem('ocr_user'); window.location.href = '/login'; return; }
+            } catch { localStorage.removeItem('ocr_token'); window.location.href = '/login'; return; }
+        })();
+    </script>
+    <script src="/static/js/app.js"></script>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

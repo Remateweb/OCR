@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Live Stream - Extração de Dados de Leilão</title>
+    <meta name="description" content="Extraia dados de leilões ao vivo via OCR em tempo real">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* ===== System Monitor Styles ===== */
+        .monitor-panel {
+            background: var(--bg-glass);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.2rem;
+            margin-bottom: 1.5rem;
+            backdrop-filter: blur(12px);
+        }
+        .monitor-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        .monitor-header h3 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text);
+            margin: 0;
+        }
+        .monitor-header .monitor-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+        .monitor-header .live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse-dot 2s infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(52,211,153,0.4); }
+            50% { opacity: 0.8; box-shadow: 0 0 0 4px rgba(52,211,153,0); }
+        }
+
+        /* Gauge Grid */
+        .gauges-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .gauge-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 1rem 0.5rem;
+            background: var(--bg);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            transition: border-color 0.3s;
+        }
+        .gauge-card:hover {
+            border-color: var(--border-hover);
+        }
+        .gauge-svg {
+            width: 90px;
+            height: 90px;
+            position: relative;
+        }
+        .gauge-bg {
+            fill: none;
+            stroke: var(--border);
+            stroke-width: 6;
+        }
+        .gauge-fill {
+            fill: none;
+            stroke-width: 6;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.8s ease, stroke 0.5s ease;
+        }
+        .gauge-text {
+            font-size: 1.1rem;
+            font-weight: 700;
+            fill: #e2e8f0;
+            text-anchor: middle;
+            dominant-baseline: central;
+        }
+        .gauge-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .gauge-detail {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        /* Metrics Grid */
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.6rem;
+        }
+        .metric-card {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.7rem 0.9rem;
+            background: var(--bg);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            transition: border-color 0.3s, transform 0.2s;
+        }
+        .metric-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-1px);
+        }
+        .metric-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .metric-icon.cpu { background: rgba(99,102,241,0.15); color: #6366f1; }
+        .metric-icon.mem { background: rgba(52,211,153,0.15); color: #34d399; }
+        .metric-icon.disk { background: rgba(251,191,36,0.15); color: #fbbf24; }
+        .metric-icon.net-up { background: rgba(236,72,153,0.15); color: #ec4899; }
+        .metric-icon.net-down { background: rgba(56,189,248,0.15); color: #38bdf8; }
+        .metric-icon.process { background: rgba(168,85,247,0.15); color: #a855f7; }
+        .metric-icon.uptime { background: rgba(20,184,166,0.15); color: #14b8a6; }
+        .metric-icon.rooms { background: rgba(251,146,60,0.15); color: #fb923c; }
+        .metric-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .metric-value {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: var(--text);
+            white-space: nowrap;
+        }
+        .metric-name {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        @media (max-width: 768px) {
+            .gauges-row { grid-template-columns: repeat(3, 1fr); gap: 0.6rem; }
+            .gauge-svg { width: 70px; height: 70px; }
+            .metrics-row { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-left">
+                <div class="logo"><i data-lucide="scan-text" style="width:22px;height:22px;"></i></div>
+                <div>
+                    <h1>OCR Live Stream</h1>
+                    <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem;">Extração de dados de leilão em tempo real</p>
+                </div>
+            </div>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+                <button class="btn btn-primary" id="btn-create-room" onclick="openModal()">
+                    <i data-lucide="plus" style="width:16px;height:16px;"></i> Nova Sala
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="logout()" title="Sair" style="padding:0.5rem;">
+                    <i data-lucide="log-out" style="width:16px;height:16px;"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- System Monitor -->
+        <div class="monitor-panel" id="monitor-panel">
+            <div class="monitor-header">
+                <h3>
+                    <i data-lucide="activity" style="width:16px;height:16px;"></i>
+                    Monitor do Sistema
+                </h3>
+                <div class="monitor-meta">
+                    <div class="live-dot"></div>
+                    <span id="monitor-hostname">—</span>
+                    <span id="monitor-os">—</span>
+                </div>
+            </div>
+
+            <!-- Gauges: CPU, RAM, Disk -->
+            <div class="gauges-row">
+                <div class="gauge-card">
+                    <svg class="gauge-svg" viewBox="0 0 100 100">
+                        <circle id="gauge-cpu-inner" cx="50" cy="50" r="36" fill="rgba(99,102,241,0.08)"/>
+                        <circle class="gauge-bg" cx="50" cy="50" r="40"/>
+                        <circle class="gauge-fill" id="gauge-cpu-fill" cx="50" cy="50" r="40"
+                                stroke="#6366f1"
+                                stroke-dasharray="251.33"
+                                stroke-dashoffset="251.33"
+                                transform="rotate(-90 50 50)"/>
+                        <text class="gauge-text" x="50" y="50" id="gauge-cpu-text">0%</text>
+                    </svg>
+                    <div class="gauge-label">CPU</div>
+                    <div class="gauge-detail" id="gauge-cpu-detail">— cores</div>
+                </div>
+                <div class="gauge-card">
+                    <svg class="gauge-svg" viewBox="0 0 100 100">
+                        <circle id="gauge-mem-inner" cx="50" cy="50" r="36" fill="rgba(52,211,153,0.08)"/>
+                        <circle class="gauge-bg" cx="50" cy="50" r="40"/>
+                        <circle class="gauge-fill" id="gauge-mem-fill" cx="50" cy="50" r="40"
+                                stroke="#34d399"
+                                stroke-dasharray="251.33"
+                                stroke-dashoffset="251.33"
+                                transform="rotate(-90 50 50)"/>
+                        <text class="gauge-text" x="50" y="50" id="gauge-mem-text">0%</text>
+                    </svg>
+                    <div class="gauge-label">Memória RAM</div>
+                    <div class="gauge-detail" id="gauge-mem-detail">— / —</div>
+                </div>
+                <div class="gauge-card">
+                    <svg class="gauge-svg" viewBox="0 0 100 100">
+                        <circle id="gauge-disk-inner" cx="50" cy="50" r="36" fill="rgba(251,191,36,0.08)"/>
+                        <circle class="gauge-bg" cx="50" cy="50" r="40"/>
+                        <circle class="gauge-fill" id="gauge-disk-fill" cx="50" cy="50" r="40"
+                                stroke="#fbbf24"
+                                stroke-dasharray="251.33"
+                                stroke-dashoffset="251.33"
+                                transform="rotate(-90 50 50)"/>
+                        <text class="gauge-text" x="50" y="50" id="gauge-disk-text">0%</text>
+                    </svg>
+                    <div class="gauge-label">Disco</div>
+                    <div class="gauge-detail" id="gauge-disk-detail">— / —</div>
+                </div>
+            </div>
+
+            <!-- Metrics Cards -->
+            <div class="metrics-row">
+                <div class="metric-card">
+                    <div class="metric-icon process"><i data-lucide="cpu" style="width:16px;height:16px;"></i></div>
+                    <div class="metric-info">
+                        <div class="metric-value" id="metric-proc-mem">—</div>
+                        <div class="metric-name">Processo OCR</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon uptime"><i data-lucide="clock" style="width:16px;height:16px;"></i></div>
+                    <div class="metric-info">
+                        <div class="metric-value" id="metric-uptime">—</div>
+                        <div class="metric-name">Uptime</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon rooms"><i data-lucide="radio" style="width:16px;height:16px;"></i></div>
+                    <div class="metric-info">
+                        <div class="metric-value" id="metric-rooms">—</div>
+                        <div class="metric-name">Salas Ativas</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon net-up"><i data-lucide="arrow-up" style="width:16px;height:16px;"></i></div>
+                    <div class="metric-info">
+                        <div class="metric-value" id="metric-net-up">—</div>
+                        <div class="metric-name">Enviado</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon net-down"><i data-lucide="arrow-down" style="width:16px;height:16px;"></i></div>
+                    <div class="metric-info">
+                        <div class="metric-value" id="metric-net-down">—</div>
+                        <div class="metric-name">Recebido</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon cpu"><i data-lucide="users" style="width:16px;height:16px;"></i></div>
+                    <div class="metric-info">
+                        <div class="metric-value" id="metric-ws">—</div>
+                        <div class="metric-name">Conexões WS</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="rooms-container" class="rooms-grid">
+            <!-- Rooms loaded dynamically -->
+        </div>
+
+        <div id="empty-state" class="empty-state" style="display: none;">
+            <div class="icon"><i data-lucide="radio" style="width:48px;height:48px;opacity:0.3;"></i></div>
+            <h3 style="margin-bottom: 0.5rem;">Nenhuma sala criada</h3>
+            <p>Crie uma nova sala para começar a extrair dados de transmissões ao vivo de leilão.</p>
+        </div>
+    </div>
+
+    <!-- Create Room Modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+            <h2>Nova Sala</h2>
+            <div>
+                <label for="room-name">Nome da Sala</label>
+                <input type="text" id="room-name" class="input" placeholder="Ex: Leilão Nelore Eliza" autofocus>
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+                <button class="btn btn-primary" id="btn-confirm-create" onclick="createRoom()">Criar Sala</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // Auth guard
+        (async function checkAuth() {
+            const token = localStorage.getItem('ocr_token');
+            if (!token) { window.location.href = '/login'; return; }
+            try {
+                const res = await fetch('/api/auth/check', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!res.ok) { localStorage.removeItem('ocr_token'); localStorage.removeItem('ocr_user'); window.location.href = '/login'; return; }
+            } catch { localStorage.removeItem('ocr_token'); window.location.href = '/login'; return; }
+        })();
+    </script>
+    <script>
+        const API = '';
+
+        // ===== SYSTEM MONITOR =====
+        const CIRC = 2 * Math.PI * 40; // 251.33
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function formatUptime(seconds) {
+            const d = Math.floor(seconds / 86400);
+            const h = Math.floor((seconds % 86400) / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            if (d > 0) return `${d}d ${h}h ${m}m`;
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
+        function getGaugeColor(percent) {
+            if (percent < 50) return '#34d399';      // green
+            if (percent < 75) return '#fbbf24';      // yellow
+            if (percent < 90) return '#fb923c';      // orange
+            return '#ef4444';                         // red
+        }
+
+        function updateGauge(id, percent, defaultColor) {
+            const fill = document.getElementById(`gauge-${id}-fill`);
+            const text = document.getElementById(`gauge-${id}-text`);
+            const inner = document.getElementById(`gauge-${id}-inner`);
+            const color = getGaugeColor(percent);
+            const offset = CIRC - (CIRC * percent / 100);
+            fill.style.strokeDashoffset = offset;
+            fill.style.stroke = color;
+            text.textContent = Math.round(percent) + '%';
+            // Color the inner circle with the same gauge color
+            if (inner) {
+                // Extract rgb from hex and apply with low alpha
+                const r = parseInt(color.slice(1,3), 16);
+                const g = parseInt(color.slice(3,5), 16);
+                const b = parseInt(color.slice(5,7), 16);
+                inner.setAttribute('fill', `rgba(${r},${g},${b},0.1)`);
+            }
+        }
+
+        async function fetchSystemStats() {
+            try {
+                const res = await fetch(`${API}/api/system/stats`);
+                const d = await res.json();
+                if (d.error) return;
+
+                // Gauges
+                updateGauge('cpu', d.cpu.percent);
+                updateGauge('mem', d.memory.percent);
+                updateGauge('disk', d.disk.percent);
+
+                // Gauge details
+                document.getElementById('gauge-cpu-detail').textContent =
+                    `${d.cpu.cores} cores` + (d.cpu.freq_mhz ? ` · ${d.cpu.freq_mhz} MHz` : '');
+                // Use (total - available) to match psutil's percent calculation
+                const memUsedReal = d.memory.total - d.memory.available;
+                document.getElementById('gauge-mem-detail').textContent =
+                    `${formatBytes(memUsedReal)} / ${formatBytes(d.memory.total)}`;
+                document.getElementById('gauge-disk-detail').textContent =
+                    `${formatBytes(d.disk.used)} / ${formatBytes(d.disk.total)}`;
+
+                // Metric cards
+                document.getElementById('metric-proc-mem').textContent = formatBytes(d.process.memory_rss);
+                document.getElementById('metric-uptime').textContent = formatUptime(d.app.uptime_seconds);
+                document.getElementById('metric-rooms').textContent =
+                    `${d.app.active_ocr_rooms} / ${d.app.total_streams}`;
+                document.getElementById('metric-net-up').textContent = formatBytes(d.network.bytes_sent);
+                document.getElementById('metric-net-down').textContent = formatBytes(d.network.bytes_recv);
+                document.getElementById('metric-ws').textContent = d.app.active_ws_connections;
+
+                // Header meta
+                document.getElementById('monitor-hostname').textContent = d.system.hostname;
+                document.getElementById('monitor-os').textContent =
+                    `${d.system.os} ${d.system.os_version} · Python ${d.system.python_version}`;
+
+            } catch (e) {
+                console.error('Monitor error:', e);
+            }
+        }
+
+        // Poll every 3 seconds
+        fetchSystemStats();
+        setInterval(fetchSystemStats, 3000);
+
+
+        // ===== ROOMS =====
+        async function loadRooms() {
+            try {
+                const res = await fetch(`${API}/api/rooms`);
+                const rooms = await res.json();
+                const container = document.getElementById('rooms-container');
+                const emptyState = document.getElementById('empty-state');
+
+                if (rooms.length === 0) {
+                    container.innerHTML = '';
+                    emptyState.style.display = 'flex';
+                    lucide.createIcons();
+                    return;
+                }
+
+                emptyState.style.display = 'none';
+                container.innerHTML = rooms.map(room => `
+                    <div class="card room-card" onclick="window.location.href='/room/${room.id}'">
+                        <div class="room-name">${room.name}</div>
+                        <div class="room-meta">
+                            <span>
+                                <span class="status-dot ${room.is_active ? 'active' : 'idle'}"></span>
+                                ${room.is_active ? 'Extraindo' : room.stream_url ? 'Configurado' : 'Aguardando'}
+                            </span>
+                            <span>${formatDate(room.created_at)}</span>
+                            <span>ID: ${room.id}</span>
+                        </div>
+                        ${room.stream_url ? `<div style="margin-top: 0.75rem; font-size: 0.78rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${room.stream_url}</div>` : ''}
+                    </div>
+                `).join('');
+                lucide.createIcons();
+            } catch (err) {
+                showToast('Erro ao carregar salas', 'error');
+            }
+        }
+
+        function formatDate(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+
+        function openModal() {
+            document.getElementById('modal-overlay').classList.add('active');
+            setTimeout(() => document.getElementById('room-name').focus(), 100);
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').classList.remove('active');
+            document.getElementById('room-name').value = '';
+        }
+
+        async function createRoom() {
+            const name = document.getElementById('room-name').value.trim();
+            if (!name) {
+                showToast('Digite um nome para a sala', 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API}/api/rooms`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const room = await res.json();
+                closeModal();
+                showToast(`Sala "${name}" criada!`, 'success');
+                window.location.href = `/room/${room.id}`;
+            } catch (err) {
+                showToast('Erro ao criar sala', 'error');
+            }
+        }
+
+        function showToast(msg, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // Enter key in modal
+        document.getElementById('room-name').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') createRoom();
+            if (e.key === 'Escape') closeModal();
+        });
+
+        // Close modal on overlay click
+        document.getElementById('modal-overlay').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeModal();
+        });
+
+        function logout() {
+            localStorage.removeItem('ocr_token');
+            localStorage.removeItem('ocr_user');
+            window.location.href = '/login';
+        }
+
+        // Load rooms on page load
+        loadRooms();
+        lucide.createIcons();
+    </script>
+</body>
+</html>
+

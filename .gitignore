@@ -1,0 +1,33 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Runtime data
+frames/
+data/
+output/
+*.db
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets
+cookies.txt
+
+# Docker volumes
+certbot/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Samples
+samples/
