@@ -222,17 +222,262 @@ async def post_ocr_bid(room_id: str, auction_id: int, lote: str, valor: str):
 # ============================================================
 # App lifecycle
 # ============================================================
+auto_sync_task: asyncio.Task | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global auto_sync_task
     await init_db()
     os.makedirs("frames", exist_ok=True)
     os.makedirs("static", exist_ok=True)
+    # Start auto-sync background task
+    auto_sync_task = asyncio.create_task(auto_sync_loop())
+    logger.info("[AUTO-SYNC] Background task started")
     yield
     # Cleanup
+    if auto_sync_task:
+        auto_sync_task.cancel()
     for stream in active_streams.values():
         stream.stop()
     for task in ocr_tasks.values():
         task.cancel()
+
+
+# ============================================================
+# Auto-Sync: RemateWeb → OCR Rooms
+# ============================================================
+AUTO_SYNC_INTERVAL = 60  # seconds
+
+
+async def auto_sync_loop():
+    """Background loop que sincroniza leilões ao vivo com salas OCR."""
+    await asyncio.sleep(5)  # Aguardar startup
+    while True:
+        try:
+            await auto_sync_auctions()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[AUTO-SYNC] Erro no sync: {e}")
+        await asyncio.sleep(AUTO_SYNC_INTERVAL)
+
+
+async def auto_sync_auctions():
+    """Busca leilões ao vivo e cria/inicia salas OCR automaticamente."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{REMATEWEB_API}/api/auction",
+                params={
+                    "Visible": "true",
+                    "Agenda": "true",
+                    "PageIndex": "1",
+                    "PageSize": "100",
+                    "OrderBy": "0",
+                    "SortDirection": "0",
+                }
+            )
+            if resp.status_code != 200:
+                logger.warning(f"[AUTO-SYNC] API retornou {resp.status_code}")
+                return
+            data = resp.json()
+    except Exception as e:
+        logger.warning(f"[AUTO-SYNC] Falha ao buscar leilões: {e}")
+        return
+
+    auctions = data.get("auctions", [])
+    live_auctions = []
+
+    for auction in auctions:
+        if not auction.get("live"):
+            continue
+        # Buscar detalhe para pegar streaming.application e partner (canal)
+        auction_id = str(auction["id"])
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                detail_resp = await client.get(f"{REMATEWEB_API}/api/auction/{auction_id}")
+                if detail_resp.status_code == 200:
+                    detail = detail_resp.json()
+                    streaming = detail.get("streaming")
+                    if streaming and streaming.get("application"):
+                        # Partner posição 1 = canal de transmissão
+                        partners = detail.get("auctionPartners", []) or auction.get("auctionPartners", [])
+                        channel_partner = None
+                        if partners:
+                            # Ordenar por order e pegar o primeiro
+                            sorted_partners = sorted(partners, key=lambda p: p.get("order", 999))
+                            channel_partner = sorted_partners[0].get("partnerName", "") if sorted_partners else None
+
+                        live_auctions.append({
+                            "id": auction_id,
+                            "title": auction.get("title", f"Leilão {auction_id}"),
+                            "application": streaming["application"],
+                            "dns": streaming.get("dns", ""),
+                            "port": streaming.get("port", 1935),
+                            "channel_partner": channel_partner,
+                        })
+        except Exception as e:
+            logger.debug(f"[AUTO-SYNC] Falha ao buscar detalhe do leilão {auction_id}: {e}")
+
+    live_ids = {a["id"] for a in live_auctions}
+    logger.info(f"[AUTO-SYNC] Leilões ao vivo: {len(live_auctions)} | IDs: {live_ids}")
+
+    # 1. Criar salas para novos leilões ao vivo
+    for auction in live_auctions:
+        auction_id = auction["id"]
+        # Verificar se já existe sala vinculada
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM rooms WHERE auction_id = ?", (auction_id,))
+            existing = await cursor.fetchone()
+
+        if existing:
+            room_id = existing["id"]
+            # Se a sala existe mas OCR não está rodando, reiniciar
+            if room_id not in ocr_tasks or ocr_tasks[room_id].done():
+                await _auto_start_room(room_id, auction)
+            continue
+
+        # Criar nova sala
+        room_id = str(uuid.uuid4())[:8]
+        now = datetime.now().isoformat()
+        stream_url = f"rtmp://{auction['dns']}:{auction['port']}/live_abr/{auction['application']}"
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO rooms (id, name, stream_url, auction_id, ocr_interval, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (room_id, auction["title"], stream_url, auction_id, 1.0, "idle", now, now)
+            )
+            await db.commit()
+
+        os.makedirs(os.path.join("frames", room_id), exist_ok=True)
+        logger.info(f"[AUTO-SYNC] ✅ Sala criada: {room_id} → {auction['title']} (auction_id={auction_id})")
+
+        # Tentar aplicar template padrão e iniciar
+        await _auto_start_room(room_id, auction)
+
+    # 2. Parar salas cujo leilão saiu do ar
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM rooms WHERE auction_id IS NOT NULL AND auction_id != ''")
+        all_linked_rooms = [dict(r) for r in await cursor.fetchall()]
+
+    for room in all_linked_rooms:
+        room_id = room["id"]
+        auction_id = room.get("auction_id", "")
+
+        if auction_id not in live_ids:
+            # Leilão não está mais ao vivo — parar OCR se estiver rodando
+            if room_id in ocr_tasks and not ocr_tasks[room_id].done():
+                logger.info(f"[AUTO-SYNC] 🛑 Leilão {auction_id} saiu do ar. Parando sala {room_id}")
+                ocr_tasks[room_id].cancel()
+                del ocr_tasks[room_id]
+
+                if room_id in active_streams:
+                    active_streams[room_id].stop()
+
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute(
+                        "UPDATE rooms SET status = 'idle', updated_at = ? WHERE id = ?",
+                        (datetime.now().isoformat(), room_id)
+                    )
+                    await db.commit()
+
+
+async def _auto_start_room(room_id: str, auction: dict):
+    """Configura stream RTMP, aplica template do canal e inicia OCR para uma sala."""
+    stream_url = f"rtmp://{auction['dns']}:{auction.get('port', 1935)}/live_abr/{auction['application']}"
+    channel_partner = auction.get("channel_partner", "")
+
+    # Configurar StreamManager (RTMP — sem probe HTTP, FFmpeg resolve direto)
+    if room_id in active_streams:
+        active_streams[room_id].stop()
+
+    sm = StreamManager(room_id, stream_url)
+    resolved = sm.resolve_url()
+    if not resolved:
+        logger.warning(f"[AUTO-SYNC] Falha ao resolver URL: {sm.error}")
+        return
+
+    active_streams[room_id] = sm
+    sm.start(interval=1.0)
+
+    # Aguardar primeiro frame (até 5s)
+    for _ in range(50):
+        if sm.get_current_frame():
+            break
+        await asyncio.sleep(0.1)
+
+    if not sm.get_current_frame():
+        logger.warning(f"[AUTO-SYNC] Sem frame para sala {room_id} ({stream_url})")
+        return
+
+    # Buscar regiões (podem já existir de config anterior)
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM regions WHERE room_id = ?", (room_id,))
+        regions = [dict(r) for r in await cursor.fetchall()]
+
+    if not regions:
+        # Buscar template pelo nome do canal (partner posição 1)
+        template = None
+        if channel_partner:
+            async with aiosqlite.connect(DB_PATH) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute("SELECT * FROM region_templates WHERE name = ? LIMIT 1", (channel_partner,))
+                template = await cursor.fetchone()
+                if template:
+                    logger.info(f"[AUTO-SYNC] 🎯 Template encontrado para canal '{channel_partner}'")
+
+        # Fallback: template mais recente
+        if not template:
+            async with aiosqlite.connect(DB_PATH) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute("SELECT * FROM region_templates ORDER BY created_at DESC LIMIT 1")
+                template = await cursor.fetchone()
+                if template:
+                    logger.info(f"[AUTO-SYNC] ℹ️ Sem template para '{channel_partner}', usando fallback: '{template['name']}'")
+
+        if template:
+            template_regions = json.loads(template["regions"])
+            async with aiosqlite.connect(DB_PATH) as db:
+                for region in template_regions:
+                    region_id = uuid.uuid4().hex[:8]
+                    await db.execute(
+                        "INSERT INTO regions (id, room_id, type, label, value, x, y, width, height, stability_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (region_id, room_id, region.get("type", "custom"), region.get("label", ""),
+                         region.get("value", ""), region["x"], region["y"],
+                         region["width"], region["height"], region.get("stability_count", 3))
+                    )
+                await db.commit()
+            regions = template_regions
+            logger.info(f"[AUTO-SYNC] 📋 Template '{template['name']}' aplicado à sala {room_id} ({len(regions)} regiões)")
+        else:
+            logger.info(f"[AUTO-SYNC] ⚠️ Sala {room_id} criada sem template. Configure regiões manualmente.")
+            return
+
+    # Cancelar OCR existente
+    if room_id in ocr_tasks and not ocr_tasks[room_id].done():
+        ocr_tasks[room_id].cancel()
+
+    # Iniciar OCR
+    task = asyncio.create_task(ocr_loop(room_id, regions, 1.0))
+    ocr_tasks[room_id] = task
+
+    # Atualizar status
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE rooms SET status = 'running', updated_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), room_id)
+        )
+        await db.commit()
+
+    logger.info(f"[AUTO-SYNC] 🚀 OCR iniciada: sala {room_id} → {auction['title']} ({stream_url})")
+    await send_telegram_alert(
+        f"🤖 OCR Auto-iniciada\n\n📺 {auction['title']}\n🔗 {stream_url}\n🏷 Auction ID: {auction['id']}",
+        room_id
+    )
 
 
 app = FastAPI(title="OCR Live Stream", lifespan=lifespan)
