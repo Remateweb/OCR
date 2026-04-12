@@ -1542,7 +1542,7 @@ async function deleteSelectedTemplate() {
     }
 
     const templateName = select.options[select.selectedIndex]?.textContent?.split('  ·  ')[0] || 'template';
-    const ok = await confirmDialog('Excluir Template', `Tem certeza que deseja excluir o template "${templateName}"? Esta ação é irreversível.`);
+    const ok = await showConfirmDialog('Excluir Template', `Tem certeza que deseja excluir o template "${templateName}"? Esta ação é irreversível.`, 'Excluir');
     if (!ok) return;
 
     try {

@@ -23,7 +23,7 @@ from typing import Optional
 
 from stream_manager import StreamManager
 
-from ocr_extractor import extract_from_bytes
+from ocr_extractor import extract_from_bytes, get_gpu_info, set_gpu_mode, is_gpu_enabled
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -248,6 +248,7 @@ async def lifespan(app: FastAPI):
 # Auto-Sync: RemateWeb → OCR Rooms
 # ============================================================
 AUTO_SYNC_INTERVAL = 60  # seconds
+RTMP_BASE = "rtmp://live.goshow.com.br:1935/live"  # RTMP fixo
 
 
 async def auto_sync_loop():
@@ -292,6 +293,10 @@ async def auto_sync_auctions():
     for auction in auctions:
         if not auction.get("live"):
             continue
+        if not auction.get("transmission"):
+            continue
+        if auction.get("forceYoutube"):
+            continue
         # Buscar detalhe para pegar streaming.application e partner (canal)
         auction_id = str(auction["id"])
         try:
@@ -301,19 +306,18 @@ async def auto_sync_auctions():
                     detail = detail_resp.json()
                     streaming = detail.get("streaming")
                     if streaming and streaming.get("application"):
-                        # Partner posição 1 = canal de transmissão
+                        # Partner index 1 = canal de transmissão
                         partners = detail.get("auctionPartners", []) or auction.get("auctionPartners", [])
                         channel_partner = None
-                        if partners:
-                            # Ordenar por order e pegar o primeiro
-                            sorted_partners = sorted(partners, key=lambda p: p.get("order", 999))
-                            channel_partner = sorted_partners[0].get("partnerName", "") if sorted_partners else None
+                        if partners and len(partners) > 1:
+                            channel_partner = partners[1].get("partnerName", "")
+                        elif partners and len(partners) == 1:
+                            channel_partner = partners[0].get("partnerName", "")
 
                         live_auctions.append({
                             "id": auction_id,
                             "title": auction.get("title", f"Leilão {auction_id}"),
                             "application": streaming["application"],
-                            "dns": streaming.get("dns", ""),
                             "port": streaming.get("port", 1935),
                             "channel_partner": channel_partner,
                         })
@@ -342,7 +346,7 @@ async def auto_sync_auctions():
         # Criar nova sala
         room_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
-        stream_url = f"rtmp://{auction['dns']}:{auction['port']}/live_abr/{auction['application']}"
+        stream_url = f"{RTMP_BASE}/{auction['application']}"
 
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
@@ -387,30 +391,45 @@ async def auto_sync_auctions():
 
 async def _auto_start_room(room_id: str, auction: dict):
     """Configura stream RTMP, aplica template do canal e inicia OCR para uma sala."""
-    stream_url = f"rtmp://{auction['dns']}:{auction.get('port', 1935)}/live_abr/{auction['application']}"
+    stream_url = f"{RTMP_BASE}/{auction['application']}"
     channel_partner = auction.get("channel_partner", "")
 
     # Configurar StreamManager (RTMP — sem probe HTTP, FFmpeg resolve direto)
     if room_id in active_streams:
-        active_streams[room_id].stop()
+        old_sm = active_streams[room_id]
+        # Se já está rodando e tem frame, não precisa recriar
+        if old_sm.running and old_sm.get_current_frame():
+            pass  # Reutilizar o StreamManager existente
+        else:
+            old_sm.stop()
+            sm = StreamManager(room_id, stream_url)
+            resolved = sm.resolve_url()
+            if not resolved:
+                logger.warning(f"[AUTO-SYNC] Falha ao resolver URL: {sm.error}")
+                return
+            active_streams[room_id] = sm
+            sm.start(interval=1.0)
+    else:
+        sm = StreamManager(room_id, stream_url)
+        resolved = sm.resolve_url()
+        if not resolved:
+            logger.warning(f"[AUTO-SYNC] Falha ao resolver URL: {sm.error}")
+            return
+        active_streams[room_id] = sm
+        sm.start(interval=1.0)
 
-    sm = StreamManager(room_id, stream_url)
-    resolved = sm.resolve_url()
-    if not resolved:
-        logger.warning(f"[AUTO-SYNC] Falha ao resolver URL: {sm.error}")
-        return
+    sm = active_streams[room_id]
 
-    active_streams[room_id] = sm
-    sm.start(interval=1.0)
-
-    # Aguardar primeiro frame (até 5s)
-    for _ in range(50):
+    # Aguardar primeiro frame (até 10s)
+    for _ in range(100):
         if sm.get_current_frame():
             break
         await asyncio.sleep(0.1)
 
     if not sm.get_current_frame():
-        logger.warning(f"[AUTO-SYNC] Sem frame para sala {room_id} ({stream_url})")
+        logger.warning(f"[AUTO-SYNC] Sem frame para sala {room_id} ({stream_url}) — stream pode estar offline, tentará novamente no próximo ciclo")
+        # NÃO retorna — mantém o StreamManager ativo para que ele reconecte sozinho
+        # Mas não inicia OCR sem frame
         return
 
     # Buscar regiões (podem já existir de config anterior)
@@ -468,8 +487,8 @@ async def _auto_start_room(room_id: str, auction: dict):
     # Atualizar status
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "UPDATE rooms SET status = 'running', updated_at = ? WHERE id = ?",
-            (datetime.now().isoformat(), room_id)
+            "UPDATE rooms SET status = 'running', stream_url = ?, updated_at = ? WHERE id = ?",
+            (stream_url, datetime.now().isoformat(), room_id)
         )
         await db.commit()
 
@@ -1180,11 +1199,25 @@ async def system_stats():
                 "os_version": platform.release(),
                 "hostname": platform.node(),
                 "python_version": platform.python_version(),
+            },
+            "gpu": {
+                "enabled": is_gpu_enabled(),
+                **(get_gpu_info() or {"available": False}),
             }
         }
     except Exception as e:
         logger.error(f"[SYSTEM] Erro ao obter stats: {e}")
         return {"error": str(e)}
+
+
+class GpuToggleRequest(BaseModel):
+    enabled: bool
+
+@app.post("/api/system/gpu")
+async def toggle_gpu(req: GpuToggleRequest):
+    """Altera entre modo GPU e CPU para o OCR."""
+    set_gpu_mode(req.enabled)
+    return {"status": "ok", "gpu_enabled": req.enabled, "message": f"Modo {'GPU' if req.enabled else 'CPU'} ativado. O modelo será recarregado na próxima extração."}
 
 
 @app.get("/api/rooms/{room_id}/extractions")

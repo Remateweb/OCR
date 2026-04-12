@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 _reader = None
+_use_gpu = None  # None = auto-detect, True/False = manual override
 
 
 def _has_gpu():
@@ -38,17 +39,74 @@ def _has_gpu():
         return False
 
 
+def get_gpu_info():
+    """Retorna info da GPU (nome, memória, utilização) ou None."""
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return None
+        gpu_name = torch.cuda.get_device_name(0)
+        mem_allocated = torch.cuda.memory_allocated(0)
+        mem_total = torch.cuda.get_device_properties(0).total_mem
+        # Tentar pegar utilização via nvidia-smi
+        gpu_util = None
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu', '--format=csv,noheader,nounits'],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0:
+                parts = result.stdout.strip().split(',')
+                gpu_util = {
+                    'utilization_percent': float(parts[0].strip()),
+                    'memory_used_mb': float(parts[1].strip()),
+                    'memory_total_mb': float(parts[2].strip()),
+                    'temperature_c': float(parts[3].strip()),
+                }
+        except Exception:
+            pass
+        return {
+            'available': True,
+            'name': gpu_name,
+            'memory_allocated': mem_allocated,
+            'memory_total': mem_total,
+            **(gpu_util or {}),
+        }
+    except ImportError:
+        return None
+    except Exception:
+        return None
+
+
+def set_gpu_mode(use_gpu: bool):
+    """Altera o modo GPU/CPU e reinicializa o reader."""
+    global _reader, _use_gpu
+    _use_gpu = use_gpu
+    if _reader is not None:
+        _reader = None  # Forçar recriação no próximo get_reader()
+        logger.info(f"[OCR] Modo alterado para {'GPU' if use_gpu else 'CPU'} — reader será recriado")
+
+
+def is_gpu_enabled():
+    """Retorna se GPU está habilitada no momento."""
+    global _use_gpu
+    if _use_gpu is None:
+        return _has_gpu()
+    return _use_gpu
+
+
 def get_reader():
     """Retorna o reader EasyOCR (singleton para não recarregar modelo)."""
-    global _reader
+    global _reader, _use_gpu
     if _reader is None:
-        use_gpu = _has_gpu()
+        use_gpu = _use_gpu if _use_gpu is not None else _has_gpu()
         logger.info(f"[OCR] Carregando modelo EasyOCR (GPU={use_gpu})...")
         _reader = easyocr.Reader(
-            ['en'],          # 'en' basta para números e texto simples de overlay
+            ['en'],
             gpu=use_gpu,
             verbose=False,
-            quantize=not use_gpu,  # Quantização só em CPU (GPU não precisa)
+            quantize=not use_gpu,
         )
         logger.info("[OCR] Modelo EasyOCR carregado!")
     return _reader

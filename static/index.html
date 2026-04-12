@@ -162,10 +162,55 @@
         }
 
         @media (max-width: 768px) {
-            .gauges-row { grid-template-columns: repeat(3, 1fr); gap: 0.6rem; }
+            .gauges-row { grid-template-columns: repeat(2, 1fr); gap: 0.6rem; }
             .gauge-svg { width: 70px; height: 70px; }
             .metrics-row { grid-template-columns: repeat(2, 1fr); }
         }
+
+        /* GPU Toggle */
+        .gpu-toggle-card {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.7rem 0.9rem;
+            background: var(--bg);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            transition: border-color 0.3s, transform 0.2s;
+            cursor: pointer;
+        }
+        .gpu-toggle-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-1px);
+        }
+        .toggle-switch {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 11px;
+            transition: background 0.3s;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .toggle-switch.active {
+            background: rgba(52,211,153,0.5);
+        }
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.3s;
+        }
+        .toggle-switch.active::after {
+            transform: translateX(18px);
+        }
+        .metric-icon.gpu { background: rgba(139,92,246,0.15); color: #8b5cf6; }
     </style>
 </head>
 <body>
@@ -246,6 +291,20 @@
                     <div class="gauge-label">Disco</div>
                     <div class="gauge-detail" id="gauge-disk-detail">— / —</div>
                 </div>
+                <div class="gauge-card" id="gauge-gpu-card" style="display:none;">
+                    <svg class="gauge-svg" viewBox="0 0 100 100">
+                        <circle id="gauge-gpu-inner" cx="50" cy="50" r="36" fill="rgba(139,92,246,0.08)"/>
+                        <circle class="gauge-bg" cx="50" cy="50" r="40"/>
+                        <circle class="gauge-fill" id="gauge-gpu-fill" cx="50" cy="50" r="40"
+                                stroke="#8b5cf6"
+                                stroke-dasharray="251.33"
+                                stroke-dashoffset="251.33"
+                                transform="rotate(-90 50 50)"/>
+                        <text class="gauge-text" x="50" y="50" id="gauge-gpu-text">0%</text>
+                    </svg>
+                    <div class="gauge-label">GPU</div>
+                    <div class="gauge-detail" id="gauge-gpu-detail">—</div>
+                </div>
             </div>
 
             <!-- Metrics Cards -->
@@ -291,6 +350,14 @@
                         <div class="metric-value" id="metric-ws">—</div>
                         <div class="metric-name">Conexões WS</div>
                     </div>
+                </div>
+                <div class="gpu-toggle-card" id="gpu-toggle-card" onclick="toggleGpu()" style="display:none;">
+                    <div class="metric-icon gpu"><i data-lucide="zap" style="width:16px;height:16px;"></i></div>
+                    <div class="metric-info" style="flex:1;">
+                        <div class="metric-value" id="metric-gpu-status">—</div>
+                        <div class="metric-name">GPU OCR</div>
+                    </div>
+                    <div class="toggle-switch" id="gpu-toggle"></div>
                 </div>
             </div>
         </div>
@@ -419,9 +486,68 @@
                 document.getElementById('monitor-os').textContent =
                     `${d.system.os} ${d.system.os_version} · Python ${d.system.python_version}`;
 
+                // GPU
+                if (d.gpu) {
+                    const gpuCard = document.getElementById('gauge-gpu-card');
+                    const gpuToggleCard = document.getElementById('gpu-toggle-card');
+                    const gpuToggle = document.getElementById('gpu-toggle');
+                    const gpuStatus = document.getElementById('metric-gpu-status');
+
+                    if (d.gpu.available) {
+                        // Show GPU gauge and toggle
+                        gpuCard.style.display = '';
+                        gpuToggleCard.style.display = '';
+                        // Update gauges row to 4 columns
+                        document.querySelector('.gauges-row').style.gridTemplateColumns = 'repeat(4, 1fr)';
+
+                        // GPU utilization gauge
+                        const gpuUtil = d.gpu.utilization_percent || 0;
+                        updateGauge('gpu', gpuUtil);
+
+                        // GPU detail: name + temp
+                        let detail = d.gpu.name || 'GPU';
+                        if (d.gpu.temperature_c) detail += ` · ${d.gpu.temperature_c}°C`;
+                        document.getElementById('gauge-gpu-detail').textContent = detail;
+
+                        // Toggle state
+                        gpuToggle.classList.toggle('active', d.gpu.enabled);
+                        gpuStatus.textContent = d.gpu.enabled ? 'Ativa' : 'Desativada';
+                    } else {
+                        // GPU not available
+                        gpuCard.style.display = 'none';
+                        gpuToggleCard.style.display = 'none';
+                    }
+                }
+
             } catch (e) {
                 console.error('Monitor error:', e);
             }
+        }
+
+        let gpuToggling = false;
+        async function toggleGpu() {
+            if (gpuToggling) return;
+            gpuToggling = true;
+            const toggle = document.getElementById('gpu-toggle');
+            const isActive = toggle.classList.contains('active');
+            const newState = !isActive;
+
+            toggle.classList.toggle('active', newState);
+            document.getElementById('metric-gpu-status').textContent = newState ? 'Ativando...' : 'Desativando...';
+
+            try {
+                const res = await fetch(`${API}/api/system/gpu`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: newState })
+                });
+                const data = await res.json();
+                showToast(data.message || `GPU ${newState ? 'ativada' : 'desativada'}`, 'success');
+            } catch (e) {
+                showToast('Erro ao alterar modo GPU', 'error');
+                toggle.classList.toggle('active', isActive); // revert
+            }
+            gpuToggling = false;
         }
 
         // Poll every 3 seconds
@@ -527,8 +653,9 @@
             window.location.href = '/login';
         }
 
-        // Load rooms on page load
+        // Load rooms on page load + auto-refresh every 10s
         loadRooms();
+        setInterval(loadRooms, 10000);
         lucide.createIcons();
     </script>
 </body>
