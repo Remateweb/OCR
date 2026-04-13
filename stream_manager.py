@@ -136,10 +136,13 @@ class StreamManager:
             "-flags", "low_delay",
             "-probesize", "32768",
             "-analyzeduration", "200000",
+            "-max_delay", "0",
         ]
 
-        # Reconnect flags só funcionam para HTTP/HLS, não RTMP
-        if self.stream_type in ("hls", "youtube", "direct"):
+        # Flags específicas por tipo de stream
+        if self.stream_type == "rtmp":
+            cmd += ["-rtmp_live", "live", "-rtmp_buffer", "0"]
+        elif self.stream_type in ("hls", "youtube", "direct"):
             cmd += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
 
         # GPU decode (NVDEC) — só para streams H.264
