@@ -1220,6 +1220,32 @@ async def toggle_gpu(req: GpuToggleRequest):
     return {"status": "ok", "gpu_enabled": req.enabled, "message": f"Modo {'GPU' if req.enabled else 'CPU'} ativado. O modelo será recarregado na próxima extração."}
 
 
+@app.post("/api/system/shutdown")
+async def shutdown_server():
+    """Desliga o servidor graciosamente — para todos os streams primeiro."""
+    import signal
+    logger.info("[SHUTDOWN] Desligamento solicitado via dashboard")
+    # Parar todos os streams
+    for room_id, sm in list(stream_managers.items()):
+        try:
+            sm.stop()
+            logger.info(f"[SHUTDOWN] Stream {room_id} parado")
+        except Exception:
+            pass
+    # Cancelar tasks OCR
+    for room_id, task in list(ocr_tasks.items()):
+        try:
+            task.cancel()
+        except Exception:
+            pass
+    # Agendar shutdown do processo
+    async def _delayed_exit():
+        await asyncio.sleep(0.5)
+        os.kill(os.getpid(), signal.SIGTERM)
+    asyncio.create_task(_delayed_exit())
+    return {"status": "ok", "message": "Servidor desligando..."}
+
+
 @app.get("/api/rooms/{room_id}/extractions")
 async def get_extractions(room_id: str, limit: int = 50):
     async with aiosqlite.connect(DB_PATH) as db:

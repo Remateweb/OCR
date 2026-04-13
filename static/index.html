@@ -227,6 +227,9 @@
                 <button class="btn btn-primary" id="btn-create-room" onclick="openModal()">
                     <i data-lucide="plus" style="width:16px;height:16px;"></i> Nova Sala
                 </button>
+                <button class="btn btn-outline btn-sm" onclick="shutdownServer()" title="Desligar servidor" style="padding:0.5rem;background:rgba(255,60,60,0.1);border-color:rgba(255,60,60,0.3);">
+                    <i data-lucide="power" style="width:16px;height:16px;color:#ff4444;"></i>
+                </button>
                 <button class="btn btn-outline btn-sm" onclick="logout()" title="Sair" style="padding:0.5rem;">
                     <i data-lucide="log-out" style="width:16px;height:16px;"></i>
                 </button>
@@ -651,6 +654,16 @@
             localStorage.removeItem('ocr_token');
             localStorage.removeItem('ocr_user');
             window.location.href = '/login';
+        }
+
+        async function shutdownServer() {
+            if (!confirm('Deseja realmente desligar o servidor OCR?\n\nTodas as salas e streams serão parados.')) return;
+            try {
+                await fetch('/api/system/shutdown', { method: 'POST' });
+                document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#fff;font-size:1.5rem;background:#0a0f1a;">⏻ Servidor desligado</div>';
+            } catch(e) {
+                document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#fff;font-size:1.5rem;background:#0a0f1a;">⏻ Servidor desligado</div>';
+            }
         }
 
         // Load rooms on page load + auto-refresh every 10s
