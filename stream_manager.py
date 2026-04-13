@@ -134,10 +134,8 @@ class StreamManager:
             "ffmpeg",
             "-fflags", "+nobuffer+discardcorrupt",
             "-flags", "low_delay",
-            "-probesize", "16384",
-            "-analyzeduration", "100000",
-            "-thread_queue_size", "512",
-            "-avioflags", "direct",
+            "-probesize", "32768",
+            "-analyzeduration", "200000",
         ]
 
         # Reconnect flags só funcionam para HTTP/HLS, não RTMP
