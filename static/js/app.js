@@ -250,6 +250,163 @@ async function restartStream() {
     }
 }
 
+// ============================================================
+// Stream Mode Selector
+// ============================================================
+let currentStreamMode = 'rtmp_pull';
+let localIp = '';
+
+// Fetch local IP on load
+fetch(`${API}/api/system/stats`).then(r => r.json()).then(d => {
+    if (d.system && d.system.local_ip) localIp = d.system.local_ip;
+}).catch(() => {});
+
+function setStreamMode(mode) {
+    currentStreamMode = mode;
+    // Update button styles
+    document.querySelectorAll('.stream-mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    // Show/hide panels
+    document.querySelectorAll('.stream-mode-panel').forEach(p => p.style.display = 'none');
+    const panel = document.getElementById(`panel-${mode}`);
+    if (panel) panel.style.display = '';
+    if (window.lucide) lucide.createIcons();
+}
+
+async function connectStreamPush() {
+    const port = document.getElementById('push-port').value.trim() || '1936';
+    const key = document.getElementById('push-key').value.trim() || 'live/canal1';
+    const pushUrl = `push://${port}/${key}`;
+
+    document.getElementById('stream-url').value = pushUrl;
+
+    const btn = document.getElementById('btn-connect-push');
+    btn.textContent = 'Iniciando...';
+    btn.disabled = true;
+
+    try {
+        const res = await fetch(`${API}/api/rooms/${ROOM_ID}/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stream_url: pushUrl })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            const ip = localIp || window.location.hostname;
+            const displayUrl = `rtmp://${ip}:${port}/${key}`;
+            document.getElementById('push-url-display').textContent = displayUrl;
+            document.getElementById('push-info').style.display = '';
+            showToast('Listener iniciado! Aguardando push...', 'success');
+            loadFrame();
+            if (regions.length > 0) {
+                setTimeout(() => startExtraction(true), 500);
+            }
+        } else {
+            showToast(`Erro: ${data.error}`, 'error');
+        }
+    } catch (err) {
+        showToast('Erro ao iniciar listener', 'error');
+    } finally {
+        btn.innerHTML = '<i data-lucide="play" style="width:14px;height:14px;"></i> Iniciar Listener';
+        btn.disabled = false;
+        if (window.lucide) lucide.createIcons();
+    }
+}
+
+async function connectStreamYoutubeAuto() {
+    const auctionId = document.getElementById('auction-id').value.trim();
+    if (!auctionId) {
+        showToast('Defina o Auction ID primeiro', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('btn-connect-yt-auto');
+    btn.textContent = 'Buscando...';
+    btn.disabled = true;
+
+    try {
+        // Fetch auction data to get YouTube URL
+        const res = await fetch(`https://test.api-net9.remateweb.com/api/auction?Visible=true&Agenda=true&PageIndex=1&PageSize=100&OrderBy=0&SortDirection=0`);
+        const auctions = await res.json();
+        const auction = auctions.find(a => String(a.id) === String(auctionId));
+        
+        if (!auction) {
+            showToast('Leilão não encontrado na API', 'error');
+            return;
+        }
+
+        const ytId = auction.youtubeId;
+        if (!ytId) {
+            showToast('Leilão sem YouTube ID configurado', 'error');
+            return;
+        }
+
+        const ytUrl = `https://www.youtube.com/watch?v=${ytId}`;
+        document.getElementById('stream-url').value = ytUrl;
+
+        const streamRes = await fetch(`${API}/api/rooms/${ROOM_ID}/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stream_url: ytUrl })
+        });
+        const data = await streamRes.json();
+        if (data.status === 'ok') {
+            showToast(`YouTube conectado! (${ytId})`, 'success');
+            loadFrame();
+            if (regions.length > 0) {
+                setTimeout(() => startExtraction(true), 500);
+            }
+        } else {
+            showToast(`Erro: ${data.error}`, 'error');
+        }
+    } catch (err) {
+        showToast('Erro ao buscar YouTube do leilão', 'error');
+    } finally {
+        btn.innerHTML = '<i data-lucide="play" style="width:14px;height:14px;"></i> Conectar';
+        btn.disabled = false;
+        if (window.lucide) lucide.createIcons();
+    }
+}
+
+async function connectStreamYoutubeManual() {
+    const url = document.getElementById('youtube-manual-url').value.trim();
+    if (!url) {
+        showToast('Cole a URL do YouTube', 'error');
+        return;
+    }
+
+    document.getElementById('stream-url').value = url;
+
+    const btn = document.getElementById('btn-connect-yt-manual');
+    btn.textContent = 'Conectando...';
+    btn.disabled = true;
+
+    try {
+        const res = await fetch(`${API}/api/rooms/${ROOM_ID}/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stream_url: url })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            showToast(`YouTube conectado!`, 'success');
+            loadFrame();
+            if (regions.length > 0) {
+                setTimeout(() => startExtraction(true), 500);
+            }
+        } else {
+            showToast(`Erro: ${data.error}`, 'error');
+        }
+    } catch (err) {
+        showToast('Erro ao conectar YouTube', 'error');
+    } finally {
+        btn.innerHTML = '<i data-lucide="play" style="width:14px;height:14px;"></i> Conectar';
+        btn.disabled = false;
+        if (window.lucide) lucide.createIcons();
+    }
+}
+
 function loadFrame() {
     const img = previewImg;
     const ts = Date.now();

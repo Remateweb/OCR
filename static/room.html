@@ -33,14 +33,65 @@
             <div class="card-header">
                 <h3><i data-lucide="radio" style="width:18px;height:18px;vertical-align:middle;margin-right:6px;"></i>Configurar Stream</h3>
             </div>
-            <div class="input-group">
-                <input type="text" id="stream-url" class="input" placeholder="Cole aqui a URL do YouTube Live ou RTMP...">
-                <button class="btn btn-primary" id="btn-connect" onclick="connectStream()">
-                    <i data-lucide="play" style="width:14px;height:14px;"></i> Conectar
+            <!-- Stream Mode Selector -->
+            <div style="display:flex;gap:0.4rem;margin-bottom:0.8rem;flex-wrap:wrap;" id="stream-mode-bar">
+                <button class="btn btn-sm stream-mode-btn active" data-mode="rtmp_pull" onclick="setStreamMode('rtmp_pull')" title="Puxa o stream de um servidor RTMP remoto">
+                    <i data-lucide="download" style="width:13px;height:13px;"></i> RTMP Pull
                 </button>
-                <button class="btn btn-outline btn-sm" id="btn-restart" onclick="restartStream()" style="display:none;" title="Reiniciar stream e OCR">
-                    <i data-lucide="rotate-cw" style="width:14px;height:14px;"></i>
+                <button class="btn btn-sm stream-mode-btn" data-mode="rtmp_push" onclick="setStreamMode('rtmp_push')" title="Recebe stream via push (Nimble restream)">
+                    <i data-lucide="upload" style="width:13px;height:13px;"></i> RTMP Push
                 </button>
+                <button class="btn btn-sm stream-mode-btn" data-mode="youtube_auto" onclick="setStreamMode('youtube_auto')" title="Pega URL do YouTube automaticamente do leilão">
+                    <i data-lucide="youtube" style="width:13px;height:13px;"></i> YouTube Auto
+                </button>
+                <button class="btn btn-sm stream-mode-btn" data-mode="youtube_manual" onclick="setStreamMode('youtube_manual')" title="Insere URL do YouTube manualmente">
+                    <i data-lucide="link" style="width:13px;height:13px;"></i> YouTube Manual
+                </button>
+            </div>
+            <!-- RTMP Pull (default) -->
+            <div class="stream-mode-panel" id="panel-rtmp_pull">
+                <div class="input-group">
+                    <input type="text" id="stream-url" class="input" placeholder="rtmp://servidor:1935/live/canal">
+                    <button class="btn btn-primary" id="btn-connect" onclick="connectStream()">
+                        <i data-lucide="play" style="width:14px;height:14px;"></i> Conectar
+                    </button>
+                    <button class="btn btn-outline btn-sm" id="btn-restart" onclick="restartStream()" style="display:none;" title="Reiniciar stream e OCR">
+                        <i data-lucide="rotate-cw" style="width:14px;height:14px;"></i>
+                    </button>
+                </div>
+            </div>
+            <!-- RTMP Push -->
+            <div class="stream-mode-panel" id="panel-rtmp_push" style="display:none;">
+                <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
+                    <label style="margin:0;white-space:nowrap;font-size:0.82rem;">Porta:</label>
+                    <input type="number" id="push-port" class="input" value="1936" style="max-width:100px;font-family:monospace;">
+                    <label style="margin:0;white-space:nowrap;font-size:0.82rem;">Stream Key:</label>
+                    <input type="text" id="push-key" class="input" value="live/canal1" style="max-width:200px;font-family:monospace;">
+                    <button class="btn btn-primary" id="btn-connect-push" onclick="connectStreamPush()">
+                        <i data-lucide="play" style="width:14px;height:14px;"></i> Iniciar Listener
+                    </button>
+                </div>
+                <div id="push-info" style="margin-top:0.6rem;padding:0.6rem 0.8rem;background:rgba(0,214,143,0.08);border:1px solid rgba(0,214,143,0.2);border-radius:var(--radius-sm);font-size:0.78rem;color:var(--accent);display:none;">
+                    <strong>Envie o stream para:</strong> <code id="push-url-display" style="user-select:all;"></code>
+                </div>
+            </div>
+            <!-- YouTube Auto -->
+            <div class="stream-mode-panel" id="panel-youtube_auto" style="display:none;">
+                <div style="display:flex;align-items:center;gap:0.6rem;">
+                    <span style="font-size:0.85rem;color:var(--text-secondary);">Pega o YouTube ID do leilão vinculado (Auction ID).</span>
+                    <button class="btn btn-primary" id="btn-connect-yt-auto" onclick="connectStreamYoutubeAuto()">
+                        <i data-lucide="play" style="width:14px;height:14px;"></i> Conectar
+                    </button>
+                </div>
+            </div>
+            <!-- YouTube Manual -->
+            <div class="stream-mode-panel" id="panel-youtube_manual" style="display:none;">
+                <div class="input-group">
+                    <input type="text" id="youtube-manual-url" class="input" placeholder="https://www.youtube.com/watch?v=...">
+                    <button class="btn btn-primary" id="btn-connect-yt-manual" onclick="connectStreamYoutubeManual()">
+                        <i data-lucide="play" style="width:14px;height:14px;"></i> Conectar
+                    </button>
+                </div>
             </div>
             <div style="display:flex;align-items:center;gap:0.8rem;margin-top:0.6rem;">
                 <label style="margin:0;white-space:nowrap;font-size:0.82rem;">Auction ID:</label>
@@ -48,9 +99,6 @@
                 <button class="btn btn-outline btn-sm" onclick="saveAuctionId()">
                     <i data-lucide="save" style="width:13px;height:13px;"></i> Salvar
                 </button>
-            </div>
-            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top:0.4rem;">
-                Suporta: YouTube Live, RTMP, HLS (m3u8)
             </div>
         </div>
 
