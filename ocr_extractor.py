@@ -47,7 +47,7 @@ def get_gpu_info():
             return None
         gpu_name = torch.cuda.get_device_name(0)
         mem_allocated = torch.cuda.memory_allocated(0)
-        mem_total = torch.cuda.get_device_properties(0).total_mem
+        mem_total = torch.cuda.get_device_properties(0).total_memory
         # Tentar pegar utilização via nvidia-smi
         gpu_util = None
         try:
