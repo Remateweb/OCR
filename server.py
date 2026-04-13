@@ -1237,10 +1237,9 @@ async def toggle_gpu(req: GpuToggleRequest):
 @app.post("/api/system/shutdown")
 async def shutdown_server():
     """Desliga o servidor graciosamente — para todos os streams primeiro."""
-    import signal
     logger.info("[SHUTDOWN] Desligamento solicitado via dashboard")
     # Parar todos os streams
-    for room_id, sm in list(stream_managers.items()):
+    for room_id, sm in list(active_streams.items()):
         try:
             sm.stop()
             logger.info(f"[SHUTDOWN] Stream {room_id} parado")
@@ -1252,10 +1251,10 @@ async def shutdown_server():
             task.cancel()
         except Exception:
             pass
-    # Agendar shutdown do processo
+    # Agendar shutdown do processo (funciona no Windows)
     async def _delayed_exit():
         await asyncio.sleep(0.5)
-        os.kill(os.getpid(), signal.SIGTERM)
+        os._exit(0)
     asyncio.create_task(_delayed_exit())
     return {"status": "ok", "message": "Servidor desligando..."}
 
