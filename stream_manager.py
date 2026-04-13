@@ -145,9 +145,9 @@ class StreamManager:
             cmd += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
 
         # GPU decode (NVDEC) — só para streams H.264
-        # NVDEC desativado por padrão - pode causar BSOD em drivers instáveis
-        # Para ativar: defina USE_NVDEC=1 como variável de ambiente
-        use_nvdec = os.environ.get('USE_NVDEC', '1') == '1'
+        # NVDEC desativado por padrão - causa BSOD em alguns drivers
+        # Para ativar: set USE_NVDEC=1 (variável de ambiente)
+        use_nvdec = os.environ.get('USE_NVDEC', '0') == '1'
         if use_nvdec and has_gpu and self.stream_type in ("rtmp", "hls", "direct"):
             cmd += [
                 "-hwaccel", "cuda",
