@@ -497,12 +497,24 @@ async def _auto_start_room(room_id: str, auction: dict):
     task = asyncio.create_task(ocr_loop(room_id, regions, 1.0))
     ocr_tasks[room_id] = task
 
-    # Atualizar status
+    # Atualizar status (preservar stream_url se foi configurado manualmente)
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE rooms SET status = 'running', stream_url = ?, updated_at = ? WHERE id = ?",
-            (stream_url, datetime.now().isoformat(), room_id)
-        )
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT stream_url FROM rooms WHERE id = ?", (room_id,))
+        row = await cursor.fetchone()
+        existing_url = row["stream_url"] if row else ""
+        
+        # Só sobrescreve a URL se não foi configurada manualmente (push://, youtube, etc)
+        if not existing_url or existing_url.startswith(RTMP_BASE):
+            await db.execute(
+                "UPDATE rooms SET status = 'running', stream_url = ?, updated_at = ? WHERE id = ?",
+                (stream_url, datetime.now().isoformat(), room_id)
+            )
+        else:
+            await db.execute(
+                "UPDATE rooms SET status = 'running', updated_at = ? WHERE id = ?",
+                (datetime.now().isoformat(), room_id)
+            )
         await db.commit()
 
     logger.info(f"[AUTO-SYNC] 🚀 OCR iniciada: sala {room_id} → {auction['title']} ({stream_url})")
