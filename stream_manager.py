@@ -58,7 +58,9 @@ class StreamManager:
     def detect_stream_type(self) -> str:
         """Detecta o tipo de stream pela URL."""
         url = self.stream_url.lower()
-        if "youtube.com" in url or "youtu.be" in url:
+        if url.startswith("push://"):
+            return "push"
+        elif "youtube.com" in url or "youtu.be" in url:
             return "youtube"
         elif url.startswith("rtmp://"):
             return "rtmp"
@@ -107,6 +109,10 @@ class StreamManager:
 
             self.error = "Não foi possível acessar o YouTube. Use uma URL direta (RTMP ou HLS/m3u8)."
             return None
+        elif self.stream_type == "push":
+            # push://1936/live/canal7 → rtmp://0.0.0.0:1936/live/canal7
+            path = self.stream_url.replace("push://", "", 1)
+            self.resolved_url = f"rtmp://0.0.0.0:{path}"
         else:
             self.resolved_url = self.stream_url
 
@@ -140,7 +146,9 @@ class StreamManager:
         ]
 
         # Flags específicas por tipo de stream
-        if self.stream_type == "rtmp":
+        if self.stream_type == "push":
+            cmd += ["-listen", "1", "-rtmp_live", "live"]
+        elif self.stream_type == "rtmp":
             cmd += ["-rtmp_live", "live", "-rtmp_buffer", "0"]
         elif self.stream_type in ("hls", "youtube", "direct"):
             cmd += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
@@ -149,7 +157,7 @@ class StreamManager:
         # NVDEC desativado por padrão - causa BSOD em alguns drivers
         # Para ativar: set USE_NVDEC=1 (variável de ambiente)
         use_nvdec = os.environ.get('USE_NVDEC', '0') == '1'
-        if use_nvdec and has_gpu and self.stream_type in ("rtmp", "hls", "direct"):
+        if use_nvdec and has_gpu and self.stream_type in ("rtmp", "push", "hls", "direct"):
             cmd += [
                 "-hwaccel", "cuda",
                 "-hwaccel_output_format", "cuda",

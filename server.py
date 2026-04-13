@@ -29,6 +29,19 @@ from ocr_extractor import extract_from_bytes, get_gpu_info, set_gpu_mode, is_gpu
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
+import socket
+
+def _get_local_ip():
+    """Retorna o IP local da máquina na rede."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
 # ============================================================
 # Database
 # ============================================================
@@ -1199,6 +1212,7 @@ async def system_stats():
                 "os_version": platform.release(),
                 "hostname": platform.node(),
                 "python_version": platform.python_version(),
+                "local_ip": _get_local_ip(),
             },
             "gpu": {
                 "enabled": is_gpu_enabled(),

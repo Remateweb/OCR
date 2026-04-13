@@ -487,7 +487,7 @@
                 // Header meta
                 document.getElementById('monitor-hostname').textContent = d.system.hostname;
                 document.getElementById('monitor-os').textContent =
-                    `${d.system.os} ${d.system.os_version} · Python ${d.system.python_version}`;
+                    `${d.system.os} ${d.system.os_version} · Python ${d.system.python_version} · ${d.system.local_ip || ''}`;
 
                 // GPU
                 if (d.gpu) {
